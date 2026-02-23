@@ -4,12 +4,18 @@ import matplotlib.pyplot as plt
 from load_dataset import SeisBenchPipelineWrapper
 
 configs_to_test = [
+
     {"dataset_name": "STEAD", "split": "train", "model_type": "eqtransformer", "apply_augmentations": True},
     {"dataset_name": "STEAD", "split": "train", "model_type": "phasenet", "apply_augmentations": False},
     {"dataset_name": "STEAD", "split": "train", "model_type": "unet", "apply_augmentations": True},
     {"dataset_name": "INSTANCE", "split": "train", "model_type": "eqtransformer", "apply_augmentations": False},
     {"dataset_name": "INSTANCE", "split": "train", "model_type": "phasenet", "apply_augmentations": False},
     {"dataset_name": "INSTANCE", "split": "train", "model_type": "unet", "apply_augmentations": True},
+    {"dataset_name": "STEAD", "split": "test", "model_type": "eqtransformer", "apply_augmentations": False},
+    {"dataset_name": "STEAD", "split": "dev", "model_type": "eqtransformer", "apply_augmentations": False},
+    {"dataset_name": "VCSEIS", "split": "train", "model_type": "eqtransformer", "apply_augmentations": True},
+    {"dataset_name": "GEOFON", "split": "train", "model_type": "eqtransformer", "apply_augmentations": True},
+    {"dataset_name": "TXED", "split": "train", "model_type": "eqtransformer", "apply_augmentations": True},
 ]
 
 def plot_batch(batch, config, save_path):
@@ -65,7 +71,7 @@ def plot_batch(batch, config, save_path):
         else:
             axs[3, i].set_xlabel("Time samples")
 
-    fig.suptitle(f"{config['model_type'].upper()} - Augments: {config['apply_augmentations']} (9 Samples Grid)", fontsize=16)
+    fig.suptitle(f"{config['model_type'].upper()} - Augments: {config['apply_augmentations']}", fontsize=16)
     plt.tight_layout()
     plt.subplots_adjust(top=0.92)
     plt.savefig(save_path)
@@ -118,7 +124,7 @@ if __name__ == "__main__":
                 if "y_det" in stacked_batch:
                     print(f"Det shape (y_det): {stacked_batch['y_det'].shape}")
                     
-                save_name = f"test_outputs/plot_{config['dataset_name']}_{config['model_type']}.png"
+                save_name = f"test_outputs/plot_{config['dataset_name']}_{config['model_type']}_{config['split']}.png"
                 plot_batch(stacked_batch, config, save_name)
             else:
                 print("No events found in the inspected batches.")

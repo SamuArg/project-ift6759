@@ -11,7 +11,7 @@ class SeisBenchPipelineWrapper:
         A unified wrapper to generate training pipelines for various seismic models using SeisBench.
         
         Parameters:
-        - dataset_name (str): "STEAD" or "INSTANCE".
+        - dataset_name (str): "STEAD", "INSTANCE", "VCSEIS", "GEOFON", "TXED".
         - split (str): "train", "dev", or "test".
         - model_type (str): "eqtransformer", "phasenet", or "unet".
         - component_order (str): Channel order, usually "ZNE".
@@ -29,6 +29,12 @@ class SeisBenchPipelineWrapper:
             dataset = sbd.STEAD(component_order=self.component_order)
         elif self.dataset_name == "INSTANCE":
             dataset = sbd.InstanceCountsCombined(component_order=self.component_order)
+        elif self.dataset_name == "VCSEIS":
+            dataset = sbd.VCSEIS(component_order=self.component_order)
+        elif self.dataset_name == "GEOFON":
+            dataset = sbd.GEOFON(component_order=self.component_order)
+        elif self.dataset_name == "TXED":
+            dataset = sbd.TXED(component_order=self.component_order)
         else:
             raise ValueError(f"Dataset {self.dataset_name} not supported.")
             
@@ -54,8 +60,12 @@ class SeisBenchPipelineWrapper:
         window_len = 6000 if self.model_type == "eqtransformer" else 3001
         
         # --- 1. WAVEFORM PREPROCESSING & AUGMENTATION ---
-        p_col = "trace_p_arrival_sample" if self.dataset_name == "STEAD" else "trace_P_arrival_sample"
-        s_col = "trace_s_arrival_sample" if self.dataset_name == "STEAD" else "trace_S_arrival_sample"
+        p_col = "trace_p_arrival_sample"
+        s_col = "trace_s_arrival_sample"
+
+        if p_col not in self.dataset.metadata.columns:
+            p_col = "trace_P_arrival_sample"
+            s_col = "trace_S_arrival_sample"
         
         if self.apply_augmentations and self.split == "train":
             print("Enabling stochastic augmentations (Train mode only)...")
@@ -111,27 +121,15 @@ class SeisBenchPipelineWrapper:
                 )
             ])
             
-        elif self.model_type == "phasenet":
+        elif self.model_type == "phasenet" or self.model_type == "unet":
             augmentations.extend([
                 sbg.ProbabilisticLabeller(
                     label_columns=[p_col], 
-                    shape="gaussian", sigma=20, key=("X", "y_p"), dim=0
+                    shape="gaussian", sigma=10, key=("X", "y_p"), dim=0
                 ),
                 sbg.ProbabilisticLabeller(
                     label_columns=[s_col], 
-                    shape="gaussian", sigma=20, key=("X", "y_s"), dim=0
-                )
-            ])
-            
-        elif self.model_type == "unet":
-            augmentations.extend([
-                sbg.ProbabilisticLabeller(
-                    label_columns=[p_col], 
-                    shape="gaussian", sigma=15, key=("X", "y_p"), dim=0
-                ),
-                sbg.ProbabilisticLabeller(
-                    label_columns=[s_col], 
-                    shape="gaussian", sigma=15, key=("X", "y_s"), dim=0
+                    shape="gaussian", sigma=10, key=("X", "y_s"), dim=0
                 )
             ])
         else:
