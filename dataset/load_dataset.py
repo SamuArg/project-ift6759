@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 class SeisBenchPipelineWrapper:
     def __init__(self, dataset_name="STEAD", split="train", model_type="eqtransformer", 
-                 component_order="ZNE", apply_augmentations=False):
+                 component_order="ZNE", max_distance=None, transformation_shape="gaussian", transformation_sigma=10):
         """
         A unified wrapper to generate training pipelines for various seismic models using SeisBench.
         
@@ -16,12 +16,17 @@ class SeisBenchPipelineWrapper:
         - model_type (str): "eqtransformer", "phasenet", or "unet".
         - component_order (str): Channel order, usually "ZNE".
         - apply_augmentations (bool): If True, applies stochastic transformations (noise, shift) during training.
+        - max_distance (float): Maximum distance in km for event selection (if supported by dataset).
+        - transformation_shape (str): "gaussian" or "triangle" for label generation.
+        - transformation_sigma (float): Sigma for probabilistic label generation.
         """
         self.dataset_name = dataset_name.upper()
         self.split = split.lower()
         self.model_type = model_type.lower()
         self.component_order = component_order
-        self.apply_augmentations = apply_augmentations
+        self.max_distance = max_distance
+        self.transformation_shape = transformation_shape
+        self.transformation_sigma = transformation_sigma
         
         # 1. Load Dataset
         print(f"Loading {self.dataset_name} ({self.split} split)...")
@@ -45,6 +50,17 @@ class SeisBenchPipelineWrapper:
             self.dataset = dataset.dev()
         elif self.split == "test":
             self.dataset = dataset.test()
+
+        if self.max_distance is not None:
+            possible_cols = ["path_hyp_distance_km", "source_distance_km"]
+            dist_col = next((col for col in possible_cols if col in self.dataset.metadata.columns), None)
+            
+            if dist_col:
+                mask = (
+                    self.dataset.metadata[dist_col] <= self.max_distance
+                ).values
+                self.dataset.filter(mask)
+            
             
         # 3. Initialize SeisBench GenericGenerator
         self.generator = sbg.GenericGenerator(self.dataset)
@@ -66,74 +82,40 @@ class SeisBenchPipelineWrapper:
         if p_col not in self.dataset.metadata.columns:
             p_col = "trace_P_arrival_sample"
             s_col = "trace_S_arrival_sample"
-        
-        if self.apply_augmentations and self.split == "train":
-            print("Enabling stochastic augmentations (Train mode only)...")
-            augmentations.extend([
-                sbg.WindowAroundSample(
-                    metadata_keys=[p_col, s_col], 
-                    selection="random", 
-                    samples_before=window_len // 2, 
-                    strategy="pad", 
-                    windowlen=window_len
-                ),
-                sbg.Normalize(demean_axis=-1, amp_norm_axis=-1, amp_norm_type="std")
-            ])
-            
-            # Custom Callable Augmentation
-            def add_stochastic_noise(state_dict):
-                X_obj = state_dict["X"]
-                is_tuple = isinstance(X_obj, tuple)
-                X = X_obj[0] if is_tuple else X_obj
 
-                if np.random.rand() < 0.5:
-                    noise = np.random.normal(0, 0.1, X.shape)
-                    X = X + noise
-                    
-                state_dict["X"] = (X, X_obj[1]) if is_tuple else X
-            augmentations.append(add_stochastic_noise)
-            
-        else:
-            print("Applying deterministic preprocessing...")
-            augmentations.extend([
-                sbg.RandomWindow(windowlen=window_len, strategy="pad"),
-                sbg.Normalize(demean_axis=-1, amp_norm_axis=-1, amp_norm_type="std")
-            ])
-            
-        # --- 2. FORMATTING FOR PYTORCH ---
-        augmentations.append(sbg.ChangeDtype(np.float32, key="X"))
+        augmentations.extend([
+            sbg.WindowAroundSample(
+                metadata_keys=[p_col, s_col], 
+                selection="random", 
+                samples_before=window_len // 2, 
+                strategy="pad", 
+                windowlen=window_len
+            ),
+            sbg.ChangeDtype(np.float32),
+            sbg.Normalize(demean_axis=-1, amp_norm_axis=-1, amp_norm_type="std"),
+            sbg.ProbabilisticLabeller(
+                label_columns=[p_col], 
+                shape=self.transformation_shape, sigma=self.transformation_sigma, key=("X", "y_p"), dim=0
+            ),
+            sbg.ChangeDtype(np.float32, key="y_p"),
+            sbg.ProbabilisticLabeller(
+                label_columns=[s_col], 
+                shape=self.transformation_shape, sigma=self.transformation_sigma, key=("X", "y_s"), dim=0
+            ),
+            sbg.ChangeDtype(np.float32, key="y_s"),
+            sbg.ChangeDtype(np.float32, key="X")
+        ])
         
         
         if self.model_type == "eqtransformer":
             augmentations.extend([
-                sbg.ProbabilisticLabeller(
-                    label_columns=[p_col], 
-                    shape="triangle", sigma=20, key=("X", "y_p"), dim=0
-                ),
-                sbg.ProbabilisticLabeller(
-                    label_columns=[s_col], 
-                    shape="triangle", sigma=20, key=("X", "y_s"), dim=0
-                ),
                 sbg.DetectionLabeller(
                     p_phases=[p_col], 
                     s_phases=[s_col], 
                     key=("X", "y_det")
-                )
-            ])
-            
-        elif self.model_type == "phasenet" or self.model_type == "unet":
-            augmentations.extend([
-                sbg.ProbabilisticLabeller(
-                    label_columns=[p_col], 
-                    shape="gaussian", sigma=10, key=("X", "y_p"), dim=0
                 ),
-                sbg.ProbabilisticLabeller(
-                    label_columns=[s_col], 
-                    shape="gaussian", sigma=10, key=("X", "y_s"), dim=0
-                )
+                sbg.ChangeDtype(np.float32, key="y_det")
             ])
-        else:
-            raise ValueError(f"Model config for {self.model_type} not defined.")
             
         self.generator.add_augmentations(augmentations)
 
