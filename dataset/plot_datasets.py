@@ -5,19 +5,19 @@ from load_dataset import SeisBenchPipelineWrapper
 
 configs_to_test = [
 
-    {"dataset_name": "STEAD", "split": "train", "model_type": "eqtransformer", "max_distance": 300, "transformation_shape": "triangle", "transformation_sigma": 20},
-    {"dataset_name": "STEAD", "split": "train", "model_type": "phasenet", "max_distance":100, "transformation_shape": "gaussian", "transformation_sigma": 10},
-    {"dataset_name": "STEAD", "split": "train", "model_type": "unet", "max_distance": None, "transformation_shape": "gaussian", "transformation_sigma": 10},
-    {"dataset_name": "INSTANCE", "split": "train", "model_type": "eqtransformer", "max_distance": 300, "transformation_shape": "triangle", "transformation_sigma": 20},
-    {"dataset_name": "INSTANCE", "split": "train", "model_type": "phasenet", "max_distance": 100, "transformation_shape": "gaussian", "transformation_sigma": 10},
-    {"dataset_name": "INSTANCE", "split": "train", "model_type": "unet", "max_distance": None, "transformation_shape": "gaussian", "transformation_sigma": 10},
-    {"dataset_name": "STEAD", "split": "test", "model_type": "eqtransformer", "max_distance": 300, "transformation_shape": "triangle", "transformation_sigma": 20},
-    {"dataset_name": "STEAD", "split": "test", "model_type": "phasenet", "max_distance":100, "transformation_shape": "gaussian", "transformation_sigma": 10},
-    {"dataset_name": "STEAD", "split": "test", "model_type": "unet", "max_distance": None, "transformation_shape": "gaussian", "transformation_sigma": 10},
-    {"dataset_name": "STEAD", "split": "dev", "model_type": "eqtransformer", "max_distance": 300, "transformation_shape": "triangle", "transformation_sigma": 20},
-    {"dataset_name": "VCSEIS", "split": "train", "model_type": "eqtransformer", "max_distance": 300, "transformation_shape": "triangle", "transformation_sigma": 20},
-    {"dataset_name": "GEOFON", "split": "train", "model_type": "eqtransformer", "max_distance": 300, "transformation_shape": "triangle", "transformation_sigma": 20},
-    {"dataset_name": "TXED", "split": "train", "model_type": "eqtransformer", "max_distance": 300, "transformation_shape": "triangle", "transformation_sigma": 20},
+    {"dataset_name": "STEAD", "split": "train", "model_type": "eqtransformer", "max_distance": 300, "transformation_shape": "triangle", "transformation_sigma": 20, "dataset_fraction": 0.1},
+    {"dataset_name": "STEAD", "split": "train", "model_type": "phasenet", "max_distance":100, "transformation_shape": "gaussian", "transformation_sigma": 10, "dataset_fraction": 0.1},
+    {"dataset_name": "STEAD", "split": "train", "model_type": "unet", "max_distance": None, "transformation_shape": "gaussian", "transformation_sigma": 10, "dataset_fraction": 0.1},
+    {"dataset_name": "INSTANCE", "split": "train", "model_type": "eqtransformer", "max_distance": 300, "transformation_shape": "triangle", "transformation_sigma": 20, 	"dataset_fraction": 0.1},
+    {"dataset_name": "INSTANCE", "split": "train", "model_type": "phasenet", "max_distance": 100, "transformation_shape": "gaussian", "transformation_sigma": 10, 	"dataset_fraction": 0.1},
+    {"dataset_name": "INSTANCE", "split": "train",	"model_type":"unet","max_distance" : None,"transformation_shape":"gaussian","transformation_sigma" : 10,"dataset_fraction" : 0.1},
+    {"dataset_name": "STEAD", "split": "test", "model_type": "eqtransformer", "max_distance": 300, "transformation_shape": "triangle", "transformation_sigma": 20, "dataset_fraction": 0.1},
+    {"dataset_name": "STEAD", "split": "test", "model_type": "phasenet", "max_distance":100, "transformation_shape": "gaussian", "transformation_sigma": 10, "dataset_fraction": 0.1},
+    {"dataset_name": "STEAD", "split": "test", "model_type": "unet", "max_distance": None, "transformation_shape": "gaussian", "transformation_sigma": 10, "dataset_fraction": 0.1},
+    {"dataset_name": "STEAD", "split": "dev", "model_type": "eqtransformer", "max_distance": 300, "transformation_shape": "triangle", "transformation_sigma": 20, 	"dataset_fraction": 0.1},
+    {"dataset_name": "VCSEIS", "split": "train", "model_type": "eqtransformer", "max_distance": 300, "transformation_shape": "triangle", "transformation_sigma": 20, 	"dataset_fraction": 0.1},
+    {"dataset_name": "GEOFON",	"split":"train","model_type":"eqtransformer","max_distance" : 300,"transformation_shape":"triangle","transformation_sigma" : 20,"dataset_fraction" : 0.1},
+    {"dataset_name":	"TXED","split":"train","model_type":"eqtransformer","max_distance" : 300,"transformation_shape":"triangle","transformation_sigma" : 20,"dataset_fraction" : 0.1},
 ]
 
 def plot_batch(batch, config, save_path):

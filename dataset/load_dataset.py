@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 class SeisBenchPipelineWrapper:
     def __init__(self, dataset_name="STEAD", split="train", model_type="eqtransformer", 
-                 component_order="ZNE", max_distance=None, transformation_shape="gaussian", transformation_sigma=10):
+                 component_order="ZNE", max_distance=None, transformation_shape="gaussian", transformation_sigma=10, dataset_fraction=1.0):
         """
         A unified wrapper to generate training pipelines for various seismic models using SeisBench.
         
@@ -27,6 +27,7 @@ class SeisBenchPipelineWrapper:
         self.max_distance = max_distance
         self.transformation_shape = transformation_shape
         self.transformation_sigma = transformation_sigma
+        self.dataset_fraction = dataset_fraction
         
         # 1. Load Dataset
         print(f"Loading {self.dataset_name} ({self.split} split)...")
@@ -56,11 +57,26 @@ class SeisBenchPipelineWrapper:
             dist_col = next((col for col in possible_cols if col in self.dataset.metadata.columns), None)
             
             if dist_col:
+                # Keep events within max_distance or with missing distance info (noise traces)
                 mask = (
-                    self.dataset.metadata[dist_col] <= self.max_distance
+                    self.dataset.metadata[dist_col] <= self.max_distance | self.dataset.metadata[dist_col].isna() 
                 ).values
                 self.dataset.filter(mask)
+            print(f"Filtered dataset to max distance {self.max_distance} km: {mask.sum()} events remain.")   
             
+        if 0.0 < self.dataset_fraction < 1.0:
+            total_events = len(self.dataset)
+            num_samples = int(total_events * self.dataset_fraction)
+            
+            subsample_mask = np.zeros(total_events, dtype=bool)
+            
+            random_indices = np.random.choice(total_events, num_samples, replace=False)
+            subsample_mask[random_indices] = True
+            
+            self.dataset.filter(subsample_mask)
+            print(f"Subsampled {self.dataset_fraction*100:.1f}% of the dataset: {num_samples} events selected.")
+
+         
             
         # 3. Initialize SeisBench GenericGenerator
         self.generator = sbg.GenericGenerator(self.dataset)
