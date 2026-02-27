@@ -59,7 +59,7 @@ class SeisBenchPipelineWrapper:
             if dist_col:
                 # Keep events within max_distance or with missing distance info (noise traces)
                 mask = (
-                    self.dataset.metadata[dist_col] <= self.max_distance | self.dataset.metadata[dist_col].isna() 
+                    (self.dataset.metadata[dist_col] <= self.max_distance) | (self.dataset.metadata[dist_col].isna())
                 ).values
                 self.dataset.filter(mask)
             print(f"Filtered dataset to max distance {self.max_distance} km: {mask.sum()} events remain.")   

@@ -17,7 +17,7 @@ configs_to_test = [
     {"dataset_name": "STEAD", "split": "dev", "model_type": "eqtransformer", "max_distance": 300, "transformation_shape": "triangle", "transformation_sigma": 20, 	"dataset_fraction": 0.1},
     {"dataset_name": "VCSEIS", "split": "train", "model_type": "eqtransformer", "max_distance": 300, "transformation_shape": "triangle", "transformation_sigma": 20, 	"dataset_fraction": 0.1},
     {"dataset_name": "GEOFON",	"split":"train","model_type":"eqtransformer","max_distance" : 300,"transformation_shape":"triangle","transformation_sigma" : 20,"dataset_fraction" : 0.1},
-    {"dataset_name":	"TXED","split":"train","model_type":"eqtransformer","max_distance" : 300,"transformation_shape":"triangle","transformation_sigma" : 20,"dataset_fraction" : 0.1},
+    {"dataset_name": "TXED","split":"train","model_type":"eqtransformer","max_distance" : 300,"transformation_shape":"triangle","transformation_sigma" : 20,"dataset_fraction" : 0.1},
 ]
 
 def plot_batch(batch, config, save_path):
