@@ -52,7 +52,7 @@ class SeisBenchPipelineWrapper:
         elif self.split == "test":
             self.dataset = dataset.test()
 
-        if self.max_distance is not None:
+        if self.max_distance is not None and self.dataset_name in ["STEAD", "INSTANCE"]:
             possible_cols = ["path_hyp_distance_km", "source_distance_km"]
             dist_col = next((col for col in possible_cols if col in self.dataset.metadata.columns), None)
             
