@@ -78,18 +78,39 @@ class SeisBenchPipelineWrapper:
 
          
             
-        # 3. Initialize SeisBench GenericGenerator
-        self.generator = sbg.GenericGenerator(self.dataset)
+        # 3. Initialize Generator (SteeredGenerator for eval, GenericGenerator for train)
+        # EQTransformer expects 6000 samples, PhaseNet expects 3001
+        self._window_len = 6000 if self.model_type == "eqtransformer" else 3001
+        
+        if self.split == "train":
+            self.generator = sbg.GenericGenerator(self.dataset)
+        else:
+            # Build control metadata: one row per trace, centred on P arrival
+            self.generator = self._build_steered_generator()
         
         # 4. Attach Model-Specific Augmentations
         self._attach_pipeline()
+
+    def _build_steered_generator(self):
+        """Builds a SteeredGenerator for eval splits with control metadata."""
+        import pandas as pd
+        meta = self.dataset.metadata.copy()
+        
+        # Detect p-arrival column
+        p_col = "trace_p_arrival_sample" if "trace_p_arrival_sample" in meta.columns else "trace_P_arrival_sample"
+        
+        # Build start/end sample centred on P arrival, fall back to trace start if NaN
+        p_samples = meta[p_col].fillna(self._window_len // 2).astype(int)
+        meta["start_sample"] = (p_samples - self._window_len // 2).clip(lower=0)
+        meta["end_sample"] = meta["start_sample"] + self._window_len
+        
+        return sbg.SteeredGenerator(self.dataset, meta)
 
     def _attach_pipeline(self):
         """Configures the native SeisBench augmentations based on the target model."""
         augmentations = []
         
-        # EQTransformer expects 6000 samples, PhaseNet expects 3001
-        window_len = 6000 if self.model_type == "eqtransformer" else 3001
+        window_len = self._window_len
         
         # --- 1. WAVEFORM PREPROCESSING & AUGMENTATION ---
         p_col = "trace_p_arrival_sample"
@@ -99,16 +120,76 @@ class SeisBenchPipelineWrapper:
             p_col = "trace_P_arrival_sample"
             s_col = "trace_S_arrival_sample"
 
+        if self.split == "train":
+            if self.model_type == "eqtransformer":
+                augmentations.extend([
+                    sbg.OneOf([
+                        sbg.WindowAroundSample(
+                            metadata_keys=[p_col, s_col], 
+                            samples_before=6000, 
+                            windowlen=12000, 
+                            selection="random", 
+                            strategy="variable"
+                        ),
+                        sbg.NullAugmentation(),
+                    ], probabilities=[2, 1]),
+                    sbg.RandomWindow(
+                        windowlen=window_len, 
+                        strategy="pad"
+                    ),
+                ])
+            elif self.model_type == "phasenet":
+                augmentations.extend([
+                    sbg.OneOf([
+                        sbg.WindowAroundSample(
+                            metadata_keys=[p_col, s_col], 
+                            samples_before=3000, 
+                            windowlen=6000, 
+                            selection="random", 
+                            strategy="variable"
+                        ),
+                        sbg.NullAugmentation(),
+                    ], probabilities=[2, 1]),
+                    sbg.RandomWindow(
+                        windowlen=window_len, 
+                        strategy="pad"
+                    ),
+                ])
+            else:
+                augmentations.extend([
+                    sbg.OneOf([
+                        sbg.WindowAroundSample(
+                            metadata_keys=[p_col, s_col], 
+                            samples_before=window_len, 
+                            windowlen=window_len * 2, 
+                            selection="random", 
+                            strategy="variable"
+                        ),
+                        sbg.NullAugmentation(),
+                    ], probabilities=[2, 1]),
+                    sbg.RandomWindow(
+                        windowlen=window_len, 
+                        strategy="pad"
+                    ),
+                ])
+        else:
+            # SteeredWindow reads start_sample/end_sample from _control_ (set by SteeredGenerator)
+            augmentations.extend([
+                sbg.SteeredWindow(
+                    windowlen=window_len,
+                    strategy="pad"
+                )
+            ])
+            
+        norm_kwargs = {"amp_norm_axis": -1, "amp_norm_type": "peak"}
+        if self.model_type == "eqtransformer":
+            norm_kwargs["detrend_axis"] = -1
+        else:
+            norm_kwargs["demean_axis"] = -1
+            
         augmentations.extend([
-            sbg.WindowAroundSample(
-                metadata_keys=[p_col, s_col], 
-                selection="random", 
-                samples_before=window_len // 2, 
-                strategy="pad", 
-                windowlen=window_len
-            ),
             sbg.ChangeDtype(np.float32),
-            sbg.Normalize(demean_axis=-1, amp_norm_axis=-1, amp_norm_type="std"),
+            sbg.Normalize(**norm_kwargs),
             sbg.ProbabilisticLabeller(
                 label_columns=[p_col], 
                 shape=self.transformation_shape, sigma=self.transformation_sigma, key=("X", "y_p"), dim=0
@@ -121,7 +202,6 @@ class SeisBenchPipelineWrapper:
             sbg.ChangeDtype(np.float32, key="y_s"),
             sbg.ChangeDtype(np.float32, key="X")
         ])
-        
         
         if self.model_type == "eqtransformer":
             augmentations.extend([
