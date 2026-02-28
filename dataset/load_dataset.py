@@ -2,20 +2,18 @@ import numpy as np
 import seisbench.data as sbd
 import seisbench.generate as sbg
 from torch.utils.data import DataLoader
-import matplotlib.pyplot as plt
 
 class SeisBenchPipelineWrapper:
     def __init__(self, dataset_name="STEAD", split="train", model_type="eqtransformer", 
                  component_order="ZNE", max_distance=None, transformation_shape="gaussian", transformation_sigma=10, dataset_fraction=1.0):
         """
         A unified wrapper to generate training pipelines for various seismic models using SeisBench.
-        
+
         Parameters:
         - dataset_name (str): "STEAD", "INSTANCE", "VCSEIS", "GEOFON", "TXED".
         - split (str): "train", "dev", or "test".
         - model_type (str): "eqtransformer", "phasenet", or "unet".
         - component_order (str): Channel order, usually "ZNE".
-        - apply_augmentations (bool): If True, applies stochastic transformations (noise, shift) during training.
         - max_distance (float): Maximum distance in km for event selection (if supported by dataset).
         - transformation_shape (str): "gaussian" or "triangle" for label generation.
         - transformation_sigma (float): Sigma for probabilistic label generation.
@@ -29,7 +27,6 @@ class SeisBenchPipelineWrapper:
         self.transformation_sigma = transformation_sigma
         self.dataset_fraction = dataset_fraction
         
-        # 1. Load Dataset
         print(f"Loading {self.dataset_name} ({self.split} split)...")
         if self.dataset_name == "STEAD":
             dataset = sbd.STEAD(component_order=self.component_order)
@@ -44,7 +41,6 @@ class SeisBenchPipelineWrapper:
         else:
             raise ValueError(f"Dataset {self.dataset_name} not supported.")
             
-        # 2. Apply Split
         if self.split == "train":
             self.dataset = dataset.train()
         elif self.split in ["dev", "val", "validation"]:
@@ -78,17 +74,14 @@ class SeisBenchPipelineWrapper:
 
          
             
-        # 3. Initialize Generator (SteeredGenerator for eval, GenericGenerator for train)
-        # EQTransformer expects 6000 samples, PhaseNet expects 3001
         self._window_len = 6000 if self.model_type == "eqtransformer" else 3001
-        
+
         if self.split == "train":
             self.generator = sbg.GenericGenerator(self.dataset)
         else:
             # Build control metadata: one row per trace, centred on P arrival
             self.generator = self._build_steered_generator()
         
-        # 4. Attach Model-Specific Augmentations
         self._attach_pipeline()
 
     def _build_steered_generator(self):
@@ -173,12 +166,8 @@ class SeisBenchPipelineWrapper:
                     ),
                 ])
         else:
-            # SteeredWindow reads start_sample/end_sample from _control_ (set by SteeredGenerator)
             augmentations.extend([
-                sbg.SteeredWindow(
-                    windowlen=window_len,
-                    strategy="pad"
-                )
+                sbg.SteeredWindow(windowlen=window_len, strategy="pad")
             ])
             
         norm_kwargs = {"amp_norm_axis": -1, "amp_norm_type": "peak"}

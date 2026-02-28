@@ -16,123 +16,19 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import OneCycleLR
 from pathlib import Path
+from tqdm import tqdm
 
-import seisbench.data as sbd
-import seisbench.generate as sbg
+# Import the canonical pipeline — do NOT redefine it here.
+# Importing from dataset.load_dataset ensures we always use the same
+# windowing, normalization, and SteeredGenerator logic for all models.
+try:
+    from dataset.load_dataset import SeisBenchPipelineWrapper
+except ImportError:
+    # Fallback when running the file directly from project root
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+    from dataset.load_dataset import SeisBenchPipelineWrapper
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# DATA PIPELINE (SeisBench)
-# ──────────────────────────────────────────────────────────────────────────────
-
-class SeisBenchPipelineWrapper:
-    def __init__(self, dataset_name="STEAD", split="train", model_type="eqtransformer",
-                 component_order="ZNE", max_distance=None, transformation_shape="gaussian",
-                 transformation_sigma=10, dataset_fraction=1.0):
-        self.dataset_name = dataset_name.upper()
-        self.split = split.lower()
-        self.model_type = model_type.lower()
-        self.component_order = component_order
-        self.max_distance = max_distance
-        self.transformation_shape = transformation_shape
-        self.transformation_sigma = transformation_sigma
-        self.dataset_fraction = dataset_fraction
-
-        if self.dataset_name == "STEAD":
-            dataset = sbd.STEAD(component_order=self.component_order)
-        elif self.dataset_name == "INSTANCE":
-            dataset = sbd.InstanceCountsCombined(component_order=self.component_order)
-        elif self.dataset_name == "VCSEIS":
-            dataset = sbd.VCSEIS(component_order=self.component_order)
-        elif self.dataset_name == "GEOFON":
-            dataset = sbd.GEOFON(component_order=self.component_order)
-        elif self.dataset_name == "TXED":
-            dataset = sbd.TXED(component_order=self.component_order)
-        else:
-            raise ValueError(f"Dataset {self.dataset_name} not supported.")
-
-        if self.split == "train":
-            self.dataset = dataset.train()
-        elif self.split in ["dev", "val", "validation"]:
-            self.dataset = dataset.dev()
-        elif self.split == "test":
-            self.dataset = dataset.test()
-
-        if self.max_distance is not None and self.dataset_name in ["STEAD", "INSTANCE"]:
-            possible_cols = ["path_hyp_distance_km", "source_distance_km"]
-            dist_col = next((col for col in possible_cols if col in self.dataset.metadata.columns), None)
-            if dist_col:
-                mask = (
-                    (self.dataset.metadata[dist_col] <= self.max_distance) |
-                    (self.dataset.metadata[dist_col].isna())
-                ).values
-                self.dataset.filter(mask)
-
-        if 0.0 < self.dataset_fraction < 1.0:
-            total_events = len(self.dataset)
-            num_samples = int(total_events * self.dataset_fraction)
-            subsample_mask = np.zeros(total_events, dtype=bool)
-            subsample_mask[np.random.choice(total_events, num_samples, replace=False)] = True
-            self.dataset.filter(subsample_mask)
-
-        self.generator = sbg.GenericGenerator(self.dataset)
-        self._attach_pipeline()
-
-    def _attach_pipeline(self):
-        augmentations = []
-        window_len = 6000 if self.model_type == "eqtransformer" else 3001
-
-        p_col = "trace_p_arrival_sample"
-        s_col = "trace_s_arrival_sample"
-        if p_col not in self.dataset.metadata.columns:
-            p_col = "trace_P_arrival_sample"
-            s_col = "trace_S_arrival_sample"
-
-        augmentations.extend([
-            sbg.WindowAroundSample(
-                metadata_keys=[p_col, s_col],
-                selection="random",
-                samples_before=window_len // 2,
-                strategy="pad",
-                windowlen=window_len
-            ),
-            sbg.ChangeDtype(np.float32),
-            sbg.Normalize(demean_axis=-1, amp_norm_axis=-1, amp_norm_type="std"),
-            sbg.ProbabilisticLabeller(
-                label_columns=[p_col],
-                shape=self.transformation_shape,
-                sigma=self.transformation_sigma,
-                key=("X", "y_p"),
-                dim=0
-            ),
-            sbg.ChangeDtype(np.float32, key="y_p"),
-            sbg.ProbabilisticLabeller(
-                label_columns=[s_col],
-                shape=self.transformation_shape,
-                sigma=self.transformation_sigma,
-                key=("X", "y_s"),
-                dim=0
-            ),
-            sbg.ChangeDtype(np.float32, key="y_s"),
-            sbg.ChangeDtype(np.float32, key="X"),
-        ])
-
-        if self.model_type == "eqtransformer":
-            augmentations.extend([
-                sbg.DetectionLabeller(p_phases=[p_col], s_phases=[s_col], key=("X", "y_det")),
-                sbg.ChangeDtype(np.float32, key="y_det"),
-            ])
-
-        self.generator.add_augmentations(augmentations)
-
-    def get_dataloader(self, batch_size=32, num_workers=4, shuffle=True):
-        return DataLoader(
-            self.generator,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            num_workers=num_workers,
-            pin_memory=True,
-        )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -185,8 +81,6 @@ class SeismicPicker(nn.Module):
                                   common features, separate heads for distinct decisions
         → Linear upsample       : 1500 → 6000 via interpolation (no checkerboard artifacts)
         → Sigmoid               : outputs are per-sample arrival probabilities
-
-    ~2.3M parameters — intentionally small for fast first iteration.
     """
 
     def __init__(
@@ -300,9 +194,19 @@ def phase_loss(pred: torch.Tensor, target: torch.Tensor,
     which looks like 99.7% accuracy but picks nothing.
     pos_weight_factor=10 is a starting point — raise if you miss too many picks,
     lower if you get too many false positives.
+
+    WHY binary_cross_entropy_with_logits instead of binary_cross_entropy:
+    F.binary_cross_entropy is unsafe with AMP (autocast) because float16 can
+    produce NaN/Inf inside the log. BCEWithLogitsLoss fuses sigmoid + log into a
+    numerically stable log-sum-exp computation that is AMP-safe.
+    We convert our sigmoid probabilities back to logits first; the result is
+    mathematically identical to the original BCE but compatible with autocast.
     """
     pos_weight = torch.tensor(pos_weight_factor, device=pred.device)
-    return F.binary_cross_entropy(pred, target, weight=(1 + (pos_weight - 1) * target))
+    weight     = 1 + (pos_weight - 1) * target
+    # Clamp avoids logit(-inf/+inf) for perfectly saturated sigmoid outputs
+    logits = torch.logit(pred.clamp(min=1e-6, max=1 - 1e-6))
+    return F.binary_cross_entropy_with_logits(logits, target, weight=weight)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -340,129 +244,21 @@ def pick_residuals(prob: torch.Tensor, label: torch.Tensor,
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# TRAINING LOOP
-# ──────────────────────────────────────────────────────────────────────────────
-
-def train(
-    model: nn.Module,
-    train_loader: DataLoader,
-    val_loader: DataLoader,
-    n_epochs: int        = 50,
-    learning_rate: float = 1e-3,
-    device: str          = "cuda",
-    checkpoint_dir: str  = "checkpoints",
-):
-    Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
-    model = model.to(device)
-
-    # WHY AdamW: weight decay is applied directly to weights, not through the
-    # gradient — gives cleaner regularisation than vanilla Adam.
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
-
-    # WHY OneCycleLR: ramp-up then cosine annealing consistently reaches good
-    # solutions faster than fixed LR or StepLR. Steps per batch, not per epoch.
-    scheduler = OneCycleLR(
-        optimizer,
-        max_lr=learning_rate,
-        steps_per_epoch=len(train_loader),
-        epochs=n_epochs,
-        pct_start=0.3,
-        anneal_strategy="cos",
-    )
-
-    # WHY AMP: halves VRAM usage and speeds up matmuls via float16 forward/backward,
-    # float32 optimizer steps. Safe for this architecture.
-    scaler = torch.cuda.amp.GradScaler(enabled=(device == "cuda"))
-
-    best_val_loss = float("inf")
-
-    for epoch in range(1, n_epochs + 1):
-
-        # ── Train ─────────────────────────────────────────────────────────
-        model.train()
-        train_loss = 0.0
-
-        for batch in train_loader:
-            waveform = batch["X"].to(device)               # (B, 3, 6000)
-            label_p  = batch["y_p"].squeeze(1).to(device)  # (B, 1, 6000) → (B, 6000)
-            label_s  = batch["y_s"].squeeze(1).to(device)
-
-            optimizer.zero_grad()
-
-            with torch.cuda.amp.autocast(enabled=(device == "cuda")):
-                prob_p, prob_s = model(waveform)
-                loss = phase_loss(prob_p, label_p) + phase_loss(prob_s, label_s)
-
-            scaler.scale(loss).backward()
-
-            # WHY grad clipping: LSTMs are prone to gradient explosions early
-            # in training. norm=1.0 keeps updates bounded without killing signal.
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
-            scaler.step(optimizer)
-            scaler.update()
-            scheduler.step()
-
-            train_loss += loss.item()
-
-        train_loss /= len(train_loader)
-
-        # ── Validate ──────────────────────────────────────────────────────
-        model.eval()
-        val_loss = 0.0
-        p_residuals, s_residuals = [], []
-
-        with torch.no_grad():
-            for batch in val_loader:
-                waveform = batch["X"].to(device)
-                label_p  = batch["y_p"].squeeze(1).to(device)
-                label_s  = batch["y_s"].squeeze(1).to(device)
-
-                with torch.cuda.amp.autocast(enabled=(device == "cuda")):
-                    prob_p, prob_s = model(waveform)
-                    val_loss += (phase_loss(prob_p, label_p) + phase_loss(prob_s, label_s)).item()
-
-                mean_p, _ = pick_residuals(prob_p.cpu(), label_p.cpu())
-                mean_s, _ = pick_residuals(prob_s.cpu(), label_s.cpu())
-                if not np.isnan(mean_p): p_residuals.append(mean_p)
-                if not np.isnan(mean_s): s_residuals.append(mean_s)
-
-        val_loss   /= len(val_loader)
-        mean_p_res  = float(np.mean(p_residuals)) if p_residuals else float("nan")
-        mean_s_res  = float(np.mean(s_residuals)) if s_residuals else float("nan")
-
-        print(
-            f"Epoch {epoch:03d}/{n_epochs} | "
-            f"train={train_loss:.4f} | val={val_loss:.4f} | "
-            f"P_res={mean_p_res:.1f}samp | S_res={mean_s_res:.1f}samp | "
-            f"lr={scheduler.get_last_lr()[0]:.2e}"
-        )
-
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save({
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "val_loss": val_loss,
-            }, f"{checkpoint_dir}/best_model.pt")
-
-    return model
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# INFERENCE
+# INFERENCE HELPER
 # ──────────────────────────────────────────────────────────────────────────────
 
 @torch.no_grad()
-def predict_single(model: nn.Module, waveform: np.ndarray, device: str = "cuda") -> dict:
+def predict_single(model: nn.Module, waveform: np.ndarray, device=None) -> dict:
     """
     Run inference on a single (3, L) waveform (already normalized).
 
     Returns the full probability vectors, not just argmax — the curve shape
     encodes uncertainty and can be consumed as a pick PDF by location solvers.
     """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(device) if isinstance(device, str) else device
+
     model.eval()
     x = torch.from_numpy(waveform.astype(np.float32)).unsqueeze(0).to(device)
     prob_p, prob_s = model(x)
@@ -481,60 +277,3 @@ def predict_single(model: nn.Module, waveform: np.ndarray, device: str = "cuda")
         "s_confidence":  float(prob_s.max()),
         "sp_interval_s": (s_sample - p_sample) / 100.0,   # assumes 100 Hz
     }
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# ENTRY POINT
-# ──────────────────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-
-    DEVICE     = "cuda" if torch.cuda.is_available() else "cpu"
-    BATCH_SIZE = 64
-    N_EPOCHS   = 50
-    LR         = 1e-3
-
-    # ── Dataloaders ───────────────────────────────────────────────────────
-    # model_type="eqtransformer" sets window_len=6000 inside the pipeline.
-    # This is NOT using the EQTransformer model — it just controls window length.
-    train_pipe = SeisBenchPipelineWrapper(
-        dataset_name="STEAD", split="train", model_type="eqtransformer",
-        transformation_sigma=10, dataset_fraction=1.0,
-    )
-    val_pipe = SeisBenchPipelineWrapper(
-        dataset_name="STEAD", split="dev", model_type="eqtransformer",
-        transformation_sigma=10,
-    )
-
-    train_loader = train_pipe.get_dataloader(batch_size=BATCH_SIZE, num_workers=4, shuffle=True)
-    val_loader   = val_pipe.get_dataloader(batch_size=BATCH_SIZE,   num_workers=4, shuffle=False)
-
-    # ── Model ─────────────────────────────────────────────────────────────
-    model = SeismicPicker(
-        in_channels=3,
-        base_channels=64,
-        lstm_hidden=128,
-        lstm_layers=2,
-        dropout=0.2,
-    )
-    print(f"Parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
-
-    # ── Train ─────────────────────────────────────────────────────────────
-    model = train(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        n_epochs=N_EPOCHS,
-        learning_rate=LR,
-        device=DEVICE,
-        checkpoint_dir="checkpoints",
-    )
-
-    # ── Sanity check ──────────────────────────────────────────────────────
-    dummy = np.random.randn(3, 6000).astype(np.float32)
-    out   = predict_single(model, dummy, device=DEVICE)
-    print(
-        f"P: sample={out['p_sample']}  conf={out['p_confidence']:.3f} | "
-        f"S: sample={out['s_sample']}  conf={out['s_confidence']:.3f} | "
-        f"S-P={out['sp_interval_s']:.2f}s"
-    )
