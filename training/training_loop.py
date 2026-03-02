@@ -149,17 +149,20 @@ def batch_f1_score(
     tolerance=10,
 ):
     """
-    Per-batch F1-score averaged over P and S phases.
+    Return raw (tp, fp, fn) counts summed over P and S phases.
+
+    Callers should accumulate these across batches and compute a single
+    global F1 = 2*TP / (2*TP + FP + FN) at the end, rather than averaging
+    per-batch F1 scores (which gives a biased estimate).
 
     For each trace:
       - Ground truth pick exists if label peak > noise_threshold
       - Model prediction exists if predicted peak > confidence_threshold
-      - TP: prediction AND ground truth within `tolerance` samples of each other
-      - FP: prediction with no nearby ground truth (or no ground truth at all)
-      - FN: ground truth with no prediction, or prediction outside tolerance
+      - TP: both fire AND argmax positions within `tolerance` samples
+      - FP: prediction with no nearby / no ground truth
+      - FN: ground truth with no prediction or outside tolerance
 
-    tolerance=10 samples = 0.1s at 100 Hz (same as run_evaluation default).
-    Returns F1 in [0, 1]; returns 0.0 if no picks in the batch.
+    tolerance=10 samples = 0.1 s at 100 Hz (matches run_evaluation default).
     """
     prob_p, prob_s = _unpack_predictions(outputs)
     if isinstance(prob_p, torch.Tensor):
@@ -167,7 +170,7 @@ def batch_f1_score(
     if isinstance(prob_s, torch.Tensor):
         prob_s = prob_s.float().cpu()
 
-    def _phase_f1(prob, label):
+    def _phase_counts(prob, label):
         label = label.float().cpu() if isinstance(label, torch.Tensor) else label
         pred_sample = prob.argmax(dim=1)
         pred_conf = prob.max(dim=1).values
@@ -181,7 +184,7 @@ def batch_f1_score(
             if gt and pred:
                 if abs(pred_sample[i].item() - true_sample[i].item()) <= tolerance:
                     tp += 1
-                else:  # wrong location counts as both FP and FN
+                else:  # wrong location → both FP and FN
                     fp += 1
                     fn += 1
             elif pred and not gt:  # spurious pick on noise
@@ -190,12 +193,12 @@ def batch_f1_score(
                 fn += 1
             # neither gt nor pred → TN; not counted in F1
 
-        denom = 2 * tp + fp + fn
-        return (2 * tp / denom) if denom > 0 else 0.0
+        return tp, fp, fn
 
-    f1_p = _phase_f1(prob_p, targets_p)
-    f1_s = _phase_f1(prob_s, targets_s)
-    return (f1_p + f1_s) / 2.0
+    tp_p, fp_p, fn_p = _phase_counts(prob_p, targets_p)
+    tp_s, fp_s, fn_s = _phase_counts(prob_s, targets_s)
+    # Return P and S counts separately so run_epoch can compute per-phase F1
+    return (tp_p, fp_p, fn_p, tp_s, fp_s, fn_s)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -224,7 +227,8 @@ def run_epoch(
     use_amp = scaler is not None and scaler.is_enabled()
 
     total_loss = 0.0
-    total_acc = 0.0
+    total_tp_p = total_fp_p = total_fn_p = 0
+    total_tp_s = total_fp_s = total_fn_s = 0
     n_batches = 0
 
     with torch.set_grad_enabled(is_training):
@@ -253,7 +257,7 @@ def run_epoch(
                     scheduler.step()
 
             with torch.no_grad():
-                # Accuracy computed on CPU in float32 — model-type agnostic
+                # Counts computed on CPU in float32 — model-type agnostic
                 p_cpu = _unpack_predictions(
                     tuple(
                         o.float().cpu() if isinstance(o, torch.Tensor) else o
@@ -262,15 +266,25 @@ def run_epoch(
                     if isinstance(outputs, tuple)
                     else outputs.float().cpu()
                 )
-                acc = accuracy_fn(p_cpu, label_p.float().cpu(), label_s.float().cpu())
+                tp_p, fp_p, fn_p, tp_s, fp_s, fn_s = accuracy_fn(
+                    p_cpu, label_p.float().cpu(), label_s.float().cpu()
+                )
+                total_tp_p += tp_p
+                total_fp_p += fp_p
+                total_fn_p += fn_p
+                total_tp_s += tp_s
+                total_fp_s += fp_s
+                total_fn_s += fn_s
 
             total_loss += loss.item()
-            total_acc += acc
             n_batches += 1
 
     avg_loss = total_loss / max(n_batches, 1)
-    avg_acc = total_acc / max(n_batches, 1)
-    return avg_loss, avg_acc
+    denom_p = 2 * total_tp_p + total_fp_p + total_fn_p
+    denom_s = 2 * total_tp_s + total_fp_s + total_fn_s
+    f1_p = (2 * total_tp_p / denom_p) if denom_p > 0 else 0.0
+    f1_s = (2 * total_tp_s / denom_s) if denom_s > 0 else 0.0
+    return avg_loss, f1_p, f1_s
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -279,10 +293,17 @@ def run_epoch(
 
 
 def plot_metrics(
-    train_losses, valid_losses, train_accs, valid_accs, model_name, figdir
+    train_losses,
+    valid_losses,
+    train_f1s_p,
+    valid_f1s_p,
+    train_f1s_s,
+    valid_f1s_s,
+    model_name,
+    figdir,
 ):
-    """Save loss and accuracy curves to disk."""
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    """Save loss and per-phase F1 curves to disk."""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
     ax1.plot(train_losses, label="Train Loss")
     ax1.plot(valid_losses, label="Val Loss")
@@ -291,11 +312,13 @@ def plot_metrics(
     ax1.set_ylabel("Loss")
     ax1.legend()
 
-    ax2.plot(train_accs, label="Train f1")
-    ax2.plot(valid_accs, label="Val f1")
-    ax2.set_title(f"{model_name} — Pick f1")
+    ax2.plot(train_f1s_p, label="Train F1 P", linestyle="-", color="tab:blue")
+    ax2.plot(valid_f1s_p, label="Val F1 P", linestyle="--", color="tab:blue")
+    ax2.plot(train_f1s_s, label="Train F1 S", linestyle="-", color="tab:orange")
+    ax2.plot(valid_f1s_s, label="Val F1 S", linestyle="--", color="tab:orange")
+    ax2.set_title(f"{model_name} — Pick F1 (P & S)")
     ax2.set_xlabel("Epoch")
-    ax2.set_ylabel("f1")
+    ax2.set_ylabel("F1")
     ax2.legend()
 
     plt.tight_layout()
@@ -311,6 +334,7 @@ def train(
     train_set: DataLoader,
     validation_set: DataLoader,
     test_set: DataLoader,
+    model_name: str,
     device=None,
     loss_fn=None,
     accuracy_fn=None,
@@ -359,7 +383,6 @@ def train(
         accuracy_fn = batch_f1_score
 
     model = model.to(device)
-    model_name = model.__class__.__name__
 
     if optimizer is None:
         optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
@@ -376,8 +399,10 @@ def train(
     use_amp = device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
-    train_losses, train_f1s = [], []
-    valid_losses, valid_f1s = [], []
+    train_losses = []
+    train_f1s_p, train_f1s_s = [], []
+    valid_losses = []
+    valid_f1s_p, valid_f1s_s = [], []
     best_val_loss = float("inf")
     best_weights = copy.deepcopy(model.state_dict())
 
@@ -387,7 +412,7 @@ def train(
     for epoch in tqdm(range(1, epochs + 1), desc="Epochs"):
 
         # ── Train ─────────────────────────────────────────────────────────
-        train_loss, train_f1 = run_epoch(
+        train_loss, train_f1_p, train_f1_s = run_epoch(
             model,
             train_set,
             device,
@@ -400,10 +425,11 @@ def train(
             epoch_label=f"Train {epoch}/{epochs}",
         )
         train_losses.append(train_loss)
-        train_f1s.append(train_f1)
+        train_f1s_p.append(train_f1_p)
+        train_f1s_s.append(train_f1_s)
 
         # ── Validate ──────────────────────────────────────────────────────
-        val_loss, val_f1 = run_epoch(
+        val_loss, val_f1_p, val_f1_s = run_epoch(
             model,
             validation_set,
             device,
@@ -413,7 +439,8 @@ def train(
             epoch_label=f"Val   {epoch}/{epochs}",
         )
         valid_losses.append(val_loss)
-        valid_f1s.append(val_f1)
+        valid_f1s_p.append(val_f1_p)
+        valid_f1s_s.append(val_f1_s)
 
         # ── Checkpoint ────────────────────────────────────────────────────
         if val_loss < best_val_loss:
@@ -425,8 +452,8 @@ def train(
             lr = scheduler.get_last_lr()[0]
             tqdm.write(
                 f"Epoch {epoch:03d}/{epochs} | "
-                f"train_loss={train_loss:.4f} f1={train_f1:.4f} | "
-                f"val_loss={val_loss:.4f} f1={val_f1:.4f} | "
+                f"train_loss={train_loss:.4f} f1_p={train_f1_p:.4f} f1_s={train_f1_s:.4f} | "
+                f"val_loss={val_loss:.4f} f1_p={val_f1_p:.4f} f1_s={val_f1_s:.4f} | "
                 f"lr={lr:.2e}"
             )
 
@@ -437,7 +464,7 @@ def train(
     # ── Test ──────────────────────────────────────────────────────────────
     model.load_state_dict(best_weights)
     print(f"\nEvaluating {model_name} on test set…")
-    test_loss, test_f1 = run_epoch(
+    test_loss, test_f1_p, test_f1_s = run_epoch(
         model,
         test_set,
         device,
@@ -446,7 +473,7 @@ def train(
         is_training=False,
         epoch_label="Test",
     )
-    print(f"Test loss={test_loss:.4f} | Test f1={test_f1:.4f}")
+    print(f"Test loss={test_loss:.4f} | Test f1_p={test_f1_p:.4f} f1_s={test_f1_s:.4f}")
 
     # ── Save logs ─────────────────────────────────────────────────────────
     metrics = {
@@ -454,10 +481,13 @@ def train(
         "epochs": epochs,
         "train_losses": train_losses,
         "valid_losses": valid_losses,
-        "train_f1s": train_f1s,
-        "valid_f1s": valid_f1s,
+        "train_f1s_p": train_f1s_p,
+        "train_f1s_s": train_f1s_s,
+        "valid_f1s_p": valid_f1s_p,
+        "valid_f1s_s": valid_f1s_s,
         "test_loss": test_loss,
-        "test_f1": test_f1,
+        "test_f1_p": test_f1_p,
+        "test_f1_s": test_f1_s,
     }
 
     if logdir is not None:
@@ -475,7 +505,14 @@ def train(
 
     if figdir is not None:
         plot_metrics(
-            train_losses, valid_losses, train_f1s, valid_f1s, model_name, figdir
+            train_losses,
+            valid_losses,
+            train_f1s_p,
+            valid_f1s_p,
+            train_f1s_s,
+            valid_f1s_s,
+            model_name,
+            figdir,
         )
 
     return model, metrics

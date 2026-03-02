@@ -15,15 +15,16 @@ from analysis.run_evaluation import run_evaluation
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG  ← edit to match what you want to evaluate
 # ─────────────────────────────────────────────────────────────────────────────
-MODEL_NAME = "base_lstm"  # "base_lstm" | "phasenet" | "eqtransformer"
-DATASET = "instance"  # dataset to evaluate on
+MODEL_NAME = "phasenet"  # "base_lstm" | "phasenet" | "eqtransformer"
+DATASET = "stead"  # dataset to evaluate on
 
 # CHECKPOINT: path to a locally trained .pth file, or None to use the
 # pretrained SeisBench weights already loaded by build_model().
 # Examples:
 #   CHECKPOINT = None                                    # pretrained SeisBench
 #   CHECKPOINT = "training/test_outputs/models/best_SeismicPicker.pth"
-CHECKPOINT = "training/test_outputs/models/best_SeismicPicker.pth"
+# CHECKPOINT = "training/test_outputs/models/best_SeismicPicker.pth"
+CHECKPOINT = None
 
 CONFIDENCE_THR = 0.3  # pick confidence threshold
 TOLERANCE_S = 0.1  # tolerance for TP counting (seconds)

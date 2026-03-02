@@ -8,17 +8,19 @@ def evaluate_seismic_detection(predictions, ground_truth, tolerance=0.1):
 
     Earthquake trace (gt not NaN): pick within ±tolerance → TP; outside or
     silent → FN. Noise trace (gt is NaN): any pick → FP; silent → TN.
-    Noise traces never contribute to MSE.
+    Noise traces never contribute to MAE.
 
     Args:
         predictions:  list of dicts [{'p_wave': float|nan, 's_wave': float|nan}]
                       NaN means the model did not detect a pick.
         ground_truth: list of dicts [{'p_wave': float|nan, 's_wave': float|nan}]
                       NaN means no annotated arrival (noise trace).
-        tolerance:    pick tolerance window in seconds (default 0.1 s)
+        tolerance:    pick tolerance window in seconds (default 0.1 s).
+                      Only used for the F1/precision/recall binary labels;
+                      MAE is computed on raw errors regardless of tolerance.
 
     Returns:
-        dict with MSE and F1/precision/recall scores for P and S waves.
+        dict with MAE and F1/precision/recall scores for P and S waves.
     """
     p_pred = np.array([p["p_wave"] for p in predictions], dtype=float)
     s_pred = np.array([p["s_wave"] for p in predictions], dtype=float)
@@ -34,10 +36,9 @@ def evaluate_seismic_detection(predictions, ground_truth, tolerance=0.1):
         both_valid = has_arrival & model_fired
         if both_valid.any():
             diff = pred[both_valid] - true[both_valid]
-            errors = np.where(np.abs(diff) > tolerance, diff, 0.0)
-            mse = np.mean(errors**2)
+            mae = np.mean(np.abs(diff))
         else:
-            mse = np.nan
+            mae = np.nan
 
         true_labels = has_arrival.astype(int)
         within_tol = model_fired & has_arrival & (np.abs(pred - true) <= tolerance)
@@ -47,7 +48,7 @@ def evaluate_seismic_detection(predictions, ground_truth, tolerance=0.1):
         pred_labels[within_tol] = 1
         pred_labels[noise_fp] = 1
 
-        results[f"mse_{phase}_wave"] = mse
+        results[f"mae_{phase}_wave"] = mae
         results[f"f1_{phase}_wave"] = f1_score(
             true_labels, pred_labels, zero_division=0
         )
@@ -83,7 +84,7 @@ def _print_results(results, p_true, s_true, tolerance):
     print(f"  {'Metric':<30} {'P-wave':>10} {'S-wave':>10}")
     print("-" * 55)
     print(
-        f"  {'MSE (excl. tolerance)':<30} {results['mse_p_wave']:>10.4f} {results['mse_s_wave']:>10.4f}"
+        f"  {'MAE':<30} {results['mae_p_wave']:>10.4f} {results['mae_s_wave']:>10.4f}"
     )
     print(
         f"  {'Precision':<30} {results['precision_p_wave']:>10.4f} {results['precision_s_wave']:>10.4f}"

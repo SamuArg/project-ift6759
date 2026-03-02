@@ -30,12 +30,12 @@ import numpy as np
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG  ←  edit this block to switch model / dataset / hyperparameters
 # ─────────────────────────────────────────────────────────────────────────────
-MODEL_NAME = "base_lstm"  # "base_lstm" | "phasenet" | "eqtransformer"
+MODEL = "base_lstm"  # "base_lstm" | "phasenet" | "eqtransformer"
 DATASET = "stead"  # "stead" | "instance" | "geofon" | "txed"
 FRACTION = 0.1  # fraction of training data to use (1.0 = full)
-
+N_EPOCHS = 10
+MODEL_NAME = f"{MODEL}_{DATASET}_{N_EPOCHS}_{FRACTION}"
 BATCH_SIZE = 128
-N_EPOCHS = 50
 LR = 1e-3
 SIGMA = 10  # Gaussian label width (samples)
 TYPE_LABEL = "gaussian"  # "gaussian" | "triangle"
@@ -117,13 +117,13 @@ def build_loaders(
     test_pipe = SeisBenchPipelineWrapper(split="test", **common)
 
     train_loader = train_pipe.get_dataloader(
-        batch_size=batch_size, num_workers=4, shuffle=True
+        batch_size=batch_size, num_workers=16, shuffle=True
     )
     val_loader = val_pipe.get_dataloader(
-        batch_size=batch_size, num_workers=4, shuffle=False
+        batch_size=batch_size, num_workers=16, shuffle=False
     )
     test_loader = test_pipe.get_dataloader(
-        batch_size=batch_size, num_workers=4, shuffle=False
+        batch_size=batch_size, num_workers=16, shuffle=False
     )
 
     return train_loader, val_loader, test_loader
@@ -138,7 +138,7 @@ if __name__ == "__main__":
     print(f"Device: {device}")
 
     # ── Model ─────────────────────────────────────────────────────────────
-    model, pipeline_type = build_model(MODEL_NAME)
+    model, pipeline_type = build_model(MODEL)
 
     # ── Data ──────────────────────────────────────────────────────────────
     train_loader, val_loader, test_loader = build_loaders(
@@ -164,6 +164,7 @@ if __name__ == "__main__":
         logdir=LOGDIR,
         figdir=FIGDIR,
         modeldir=MODELDIR,
+        model_name=MODEL_NAME,
     )
 
     # ── Seismic evaluation (F1, MSE, Precision/Recall) ────────────────────
