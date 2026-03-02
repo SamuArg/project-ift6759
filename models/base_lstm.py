@@ -26,14 +26,15 @@ try:
 except ImportError:
     # Fallback when running the file directly from project root
     import sys, os
+
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
     from dataset.load_dataset import SeisBenchPipelineWrapper
-
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # MODEL
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class ResidualConvBlock(nn.Module):
     """
@@ -49,10 +50,14 @@ class ResidualConvBlock(nn.Module):
     def __init__(self, channels: int, kernel_size: int = 7, dilation: int = 1):
         super().__init__()
         pad = dilation * (kernel_size - 1) // 2  # 'same' padding
-        self.conv1 = nn.Conv1d(channels, channels, kernel_size, padding=pad, dilation=dilation)
-        self.conv2 = nn.Conv1d(channels, channels, kernel_size, padding=pad, dilation=dilation)
-        self.bn1   = nn.BatchNorm1d(channels)
-        self.bn2   = nn.BatchNorm1d(channels)
+        self.conv1 = nn.Conv1d(
+            channels, channels, kernel_size, padding=pad, dilation=dilation
+        )
+        self.conv2 = nn.Conv1d(
+            channels, channels, kernel_size, padding=pad, dilation=dilation
+        )
+        self.bn1 = nn.BatchNorm1d(channels)
+        self.bn2 = nn.BatchNorm1d(channels)
 
     def forward(self, x):
         residual = x
@@ -85,11 +90,11 @@ class SeismicPicker(nn.Module):
 
     def __init__(
         self,
-        in_channels: int   = 3,
+        in_channels: int = 3,
         base_channels: int = 64,
-        lstm_hidden: int   = 128,
-        lstm_layers: int   = 2,
-        dropout: float     = 0.2,
+        lstm_hidden: int = 128,
+        lstm_layers: int = 2,
+        dropout: float = 0.2,
     ):
         super().__init__()
 
@@ -111,10 +116,14 @@ class SeismicPicker(nn.Module):
         # Downsample: 6000 → 3000 → 1500
         # WHY strided conv over MaxPool: learns the downsampling kernel
         self.downsample = nn.Sequential(
-            nn.Conv1d(base_channels, base_channels * 2, kernel_size=3, stride=2, padding=1),
+            nn.Conv1d(
+                base_channels, base_channels * 2, kernel_size=3, stride=2, padding=1
+            ),
             nn.BatchNorm1d(base_channels * 2),
             nn.ReLU(),
-            nn.Conv1d(base_channels * 2, base_channels * 2, kernel_size=3, stride=2, padding=1),
+            nn.Conv1d(
+                base_channels * 2, base_channels * 2, kernel_size=3, stride=2, padding=1
+            ),
             nn.BatchNorm1d(base_channels * 2),
             nn.ReLU(),
         )
@@ -151,37 +160,43 @@ class SeismicPicker(nn.Module):
         """
         B, C, L = x.shape
 
-        x = self.stem(x)         # (B, 64,  6000)
-        x = self.encoder(x)      # (B, 64,  6000)
-        x = self.downsample(x)   # (B, 128, 1500)
+        x = self.stem(x)  # (B, 64,  6000)
+        x = self.encoder(x)  # (B, 64,  6000)
+        x = self.downsample(x)  # (B, 128, 1500)
 
-        x = x.permute(0, 2, 1)          # (B, 1500, 128) — LSTM expects (B, L, H)
-        x, _ = self.lstm(x)              # (B, 1500, 256)
+        x = x.permute(0, 2, 1)  # (B, 1500, 128) — LSTM expects (B, L, H)
+        x, _ = self.lstm(x)  # (B, 1500, 256)
         x = self.lstm_dropout(x)
-        x = x.permute(0, 2, 1)          # (B, 256, 1500) — back to (B, H, L) for Conv1d
+        x = x.permute(0, 2, 1)  # (B, 256, 1500) — back to (B, H, L) for Conv1d
 
-        logit_p = self.head_p(x).squeeze(1)   # (B, 1500)
-        logit_s = self.head_s(x).squeeze(1)   # (B, 1500)
+        logit_p = self.head_p(x).squeeze(1)  # (B, 1500)
+        logit_s = self.head_s(x).squeeze(1)  # (B, 1500)
 
         # Upsample to original length
         # WHY interpolation not transposed conv: smooth probability curves,
         # no checkerboard artifacts, no extra parameters needed
         prob_p = torch.sigmoid(
-            F.interpolate(logit_p.unsqueeze(1), size=L, mode="linear", align_corners=False).squeeze(1)
+            F.interpolate(
+                logit_p.unsqueeze(1), size=L, mode="linear", align_corners=False
+            ).squeeze(1)
         )
         prob_s = torch.sigmoid(
-            F.interpolate(logit_s.unsqueeze(1), size=L, mode="linear", align_corners=False).squeeze(1)
+            F.interpolate(
+                logit_s.unsqueeze(1), size=L, mode="linear", align_corners=False
+            ).squeeze(1)
         )
 
-        return prob_p, prob_s   # each (B, 6000)
+        return prob_p, prob_s  # each (B, 6000)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # LOSS
 # ──────────────────────────────────────────────────────────────────────────────
 
-def phase_loss(pred: torch.Tensor, target: torch.Tensor,
-               pos_weight_factor: float = 10.0) -> torch.Tensor:
+
+def phase_loss(
+    pred: torch.Tensor, target: torch.Tensor, pos_weight_factor: float = 10.0
+) -> torch.Tensor:
     """
     Weighted Binary Cross-Entropy.
 
@@ -203,7 +218,7 @@ def phase_loss(pred: torch.Tensor, target: torch.Tensor,
     mathematically identical to the original BCE but compatible with autocast.
     """
     pos_weight = torch.tensor(pos_weight_factor, device=pred.device)
-    weight     = 1 + (pos_weight - 1) * target
+    weight = 1 + (pos_weight - 1) * target
     # Clamp avoids logit(-inf/+inf) for perfectly saturated sigmoid outputs
     logits = torch.logit(pred.clamp(min=1e-6, max=1 - 1e-6))
     return F.binary_cross_entropy_with_logits(logits, target, weight=weight)
@@ -213,8 +228,10 @@ def phase_loss(pred: torch.Tensor, target: torch.Tensor,
 # METRICS
 # ──────────────────────────────────────────────────────────────────────────────
 
-def pick_residuals(prob: torch.Tensor, label: torch.Tensor,
-                   threshold: float = 0.3, tolerance: int = 50):
+
+def pick_residuals(
+    prob: torch.Tensor, label: torch.Tensor, threshold: float = 0.3, tolerance: int = 50
+):
     """
     Mean absolute residual (in samples) between predicted and true pick,
     for traces where both a ground-truth pick and a confident prediction exist.
@@ -226,9 +243,9 @@ def pick_residuals(prob: torch.Tensor, label: torch.Tensor,
     tolerance=50 → 0.5s window to count a detection as a match.
     """
     pred_pick = prob.argmax(dim=1)
-    pred_max  = prob.max(dim=1).values
+    pred_max = prob.max(dim=1).values
     true_pick = label.argmax(dim=1)
-    has_pick  = label.max(dim=1).values > 0.1
+    has_pick = label.max(dim=1).values > 0.1
 
     residuals = []
     for i in range(len(prob)):
@@ -246,6 +263,7 @@ def pick_residuals(prob: torch.Tensor, label: torch.Tensor,
 # ──────────────────────────────────────────────────────────────────────────────
 # INFERENCE HELPER
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 @torch.no_grad()
 def predict_single(model: nn.Module, waveform: np.ndarray, device=None) -> dict:
@@ -269,11 +287,11 @@ def predict_single(model: nn.Module, waveform: np.ndarray, device=None) -> dict:
     s_sample = int(prob_s.argmax())
 
     return {
-        "prob_p":        prob_p,
-        "prob_s":        prob_s,
-        "p_sample":      p_sample,
-        "s_sample":      s_sample,
-        "p_confidence":  float(prob_p.max()),
-        "s_confidence":  float(prob_s.max()),
-        "sp_interval_s": (s_sample - p_sample) / 100.0,   # assumes 100 Hz
+        "prob_p": prob_p,
+        "prob_s": prob_s,
+        "p_sample": p_sample,
+        "s_sample": s_sample,
+        "p_confidence": float(prob_p.max()),
+        "s_confidence": float(prob_s.max()),
+        "sp_interval_s": (s_sample - p_sample) / 100.0,  # assumes 100 Hz
     }

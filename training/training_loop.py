@@ -35,6 +35,7 @@ torch.cuda.manual_seed(42)
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _unpack_batch(batch):
     """
     Accept a SeisBench dict-batch and return
@@ -44,9 +45,9 @@ def _unpack_batch(batch):
     DetectionLabeller outputs (B, T) or (B, 1, T): presence of any phase.
     label_det is None if the batch does not contain 'y_det' (non-EQT pipeline).
     """
-    waveform  = batch["X"]
-    label_p   = batch["y_p"][:, 0, :]   # (B, T) — phase probability
-    label_s   = batch["y_s"][:, 0, :]   # (B, T)
+    waveform = batch["X"]
+    label_p = batch["y_p"][:, 0, :]  # (B, T) — phase probability
+    label_s = batch["y_s"][:, 0, :]  # (B, T)
 
     # y_det is only in the batch when model_type="eqtransformer" was set in
     # the pipeline (DetectionLabeller is only added for that branch).
@@ -74,8 +75,10 @@ def _unpack_predictions(outputs):
         else:
             p, s = outputs[0], outputs[1]
         # Squeeze an extra channel dim if present: (B, 1, T) → (B, T)
-        if p.ndim == 3: p = p.squeeze(1)
-        if s.ndim == 3: s = s.squeeze(1)
+        if p.ndim == 3:
+            p = p.squeeze(1)
+        if s.ndim == 3:
+            s = s.squeeze(1)
         return p, s
     # Single tensor: assume (B, n_classes, T) with P=ch0, S=ch1
     return outputs[:, 0, :], outputs[:, 1, :]
@@ -98,8 +101,10 @@ def _get_detection_output(outputs):
 # Default loss / metric
 # ─────────────────────────────────────────────────────────────────────────────
 
-def default_phase_loss(outputs, targets_p, targets_s,
-                        targets_det=None, pos_weight_factor=10.0):
+
+def default_phase_loss(
+    outputs, targets_p, targets_s, targets_det=None, pos_weight_factor=10.0
+):
     """
     Weighted BCE loss, supporting all model types:
 
@@ -113,8 +118,10 @@ def default_phase_loss(outputs, targets_p, targets_s,
 
     def _bce(pred, target):
         # Handle (B, 1, T) shapes that may come from some models
-        if pred.ndim == 3:   pred   = pred.squeeze(1)
-        if target.ndim == 3: target = target.squeeze(1)
+        if pred.ndim == 3:
+            pred = pred.squeeze(1)
+        if target.ndim == 3:
+            target = target.squeeze(1)
         weight = 1 + (pos_w - 1) * target
         logits = torch.logit(pred.float().clamp(1e-6, 1 - 1e-6))
         return torch.nn.functional.binary_cross_entropy_with_logits(
@@ -133,8 +140,14 @@ def default_phase_loss(outputs, targets_p, targets_s,
     return loss
 
 
-def batch_f1_score(outputs, targets_p, targets_s,
-                   confidence_threshold=0.3, noise_threshold=0.1, tolerance=10):
+def batch_f1_score(
+    outputs,
+    targets_p,
+    targets_s,
+    confidence_threshold=0.3,
+    noise_threshold=0.1,
+    tolerance=10,
+):
     """
     Per-batch F1-score averaged over P and S phases.
 
@@ -149,16 +162,18 @@ def batch_f1_score(outputs, targets_p, targets_s,
     Returns F1 in [0, 1]; returns 0.0 if no picks in the batch.
     """
     prob_p, prob_s = _unpack_predictions(outputs)
-    if isinstance(prob_p, torch.Tensor): prob_p = prob_p.float().cpu()
-    if isinstance(prob_s, torch.Tensor): prob_s = prob_s.float().cpu()
+    if isinstance(prob_p, torch.Tensor):
+        prob_p = prob_p.float().cpu()
+    if isinstance(prob_s, torch.Tensor):
+        prob_s = prob_s.float().cpu()
 
     def _phase_f1(prob, label):
         label = label.float().cpu() if isinstance(label, torch.Tensor) else label
-        pred_sample  = prob.argmax(dim=1)
-        pred_conf    = prob.max(dim=1).values
-        true_sample  = label.argmax(dim=1)
-        has_gt       = label.max(dim=1).values > noise_threshold
-        has_pred     = pred_conf > confidence_threshold
+        pred_sample = prob.argmax(dim=1)
+        pred_conf = prob.max(dim=1).values
+        true_sample = label.argmax(dim=1)
+        has_gt = label.max(dim=1).values > noise_threshold
+        has_pred = pred_conf > confidence_threshold
 
         tp = fp = fn = 0
         for i in range(len(prob)):
@@ -166,8 +181,9 @@ def batch_f1_score(outputs, targets_p, targets_s,
             if gt and pred:
                 if abs(pred_sample[i].item() - true_sample[i].item()) <= tolerance:
                     tp += 1
-                else:              # wrong location counts as both FP and FN
-                    fp += 1; fn += 1
+                else:  # wrong location counts as both FP and FN
+                    fp += 1
+                    fn += 1
             elif pred and not gt:  # spurious pick on noise
                 fp += 1
             elif gt and not pred:  # missed pick
@@ -186,10 +202,18 @@ def batch_f1_score(outputs, targets_p, targets_s,
 # Core epoch runner
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def run_epoch(
-    model, dataloader, device, loss_fn, accuracy_fn,
-    optimizer=None, scheduler=None, scaler=None, is_training=True,
-    epoch_label=""
+    model,
+    dataloader,
+    device,
+    loss_fn,
+    accuracy_fn,
+    optimizer=None,
+    scheduler=None,
+    scaler=None,
+    is_training=True,
+    epoch_label="",
 ):
     """
     Run one epoch of training or validation.
@@ -200,15 +224,15 @@ def run_epoch(
     use_amp = scaler is not None and scaler.is_enabled()
 
     total_loss = 0.0
-    total_acc  = 0.0
-    n_batches  = 0
+    total_acc = 0.0
+    n_batches = 0
 
     with torch.set_grad_enabled(is_training):
         for batch in tqdm(dataloader, desc=epoch_label, leave=False):
             waveform, label_p, label_s, label_det = _unpack_batch(batch)
-            waveform  = waveform.to(device)
-            label_p   = label_p.to(device)
-            label_s   = label_s.to(device)
+            waveform = waveform.to(device)
+            label_p = label_p.to(device)
+            label_s = label_s.to(device)
             if label_det is not None:
                 label_det = label_det.to(device)
 
@@ -217,7 +241,7 @@ def run_epoch(
 
             with torch.amp.autocast("cuda", enabled=use_amp):
                 outputs = model(waveform)
-                loss    = loss_fn(outputs, label_p, label_s, label_det)
+                loss = loss_fn(outputs, label_p, label_s, label_det)
 
             if is_training:
                 scaler.scale(loss).backward()
@@ -231,19 +255,21 @@ def run_epoch(
             with torch.no_grad():
                 # Accuracy computed on CPU in float32 — model-type agnostic
                 p_cpu = _unpack_predictions(
-                    tuple(o.float().cpu() if isinstance(o, torch.Tensor) else o
-                          for o in outputs)
+                    tuple(
+                        o.float().cpu() if isinstance(o, torch.Tensor) else o
+                        for o in outputs
+                    )
                     if isinstance(outputs, tuple)
                     else outputs.float().cpu()
                 )
                 acc = accuracy_fn(p_cpu, label_p.float().cpu(), label_s.float().cpu())
 
             total_loss += loss.item()
-            total_acc  += acc
-            n_batches  += 1
+            total_acc += acc
+            n_batches += 1
 
     avg_loss = total_loss / max(n_batches, 1)
-    avg_acc  = total_acc  / max(n_batches, 1)
+    avg_acc = total_acc / max(n_batches, 1)
     return avg_loss, avg_acc
 
 
@@ -251,20 +277,26 @@ def run_epoch(
 # Main training loop
 # ─────────────────────────────────────────────────────────────────────────────
 
-def plot_metrics(train_losses, valid_losses, train_accs, valid_accs,
-                 model_name, figdir):
+
+def plot_metrics(
+    train_losses, valid_losses, train_accs, valid_accs, model_name, figdir
+):
     """Save loss and accuracy curves to disk."""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
     ax1.plot(train_losses, label="Train Loss")
     ax1.plot(valid_losses, label="Val Loss")
     ax1.set_title(f"{model_name} — Loss")
-    ax1.set_xlabel("Epoch"); ax1.set_ylabel("Loss"); ax1.legend()
+    ax1.set_xlabel("Epoch")
+    ax1.set_ylabel("Loss")
+    ax1.legend()
 
-    ax2.plot(train_accs,  label="Train f1")
-    ax2.plot(valid_accs,  label="Val f1")
+    ax2.plot(train_accs, label="Train f1")
+    ax2.plot(valid_accs, label="Val f1")
     ax2.set_title(f"{model_name} — Pick f1")
-    ax2.set_xlabel("Epoch"); ax2.set_ylabel("f1"); ax2.legend()
+    ax2.set_xlabel("Epoch")
+    ax2.set_ylabel("f1")
+    ax2.legend()
 
     plt.tight_layout()
     os.makedirs(figdir, exist_ok=True)
@@ -275,20 +307,20 @@ def plot_metrics(train_losses, valid_losses, train_accs, valid_accs,
 
 
 def train(
-    model:          nn.Module,
-    train_set:      DataLoader,
+    model: nn.Module,
+    train_set: DataLoader,
     validation_set: DataLoader,
-    test_set:       DataLoader,
+    test_set: DataLoader,
     device=None,
     loss_fn=None,
     accuracy_fn=None,
-    optimizer:      optim.Optimizer = None,
-    epochs:         int   = 50,
-    learning_rate:  float = 1e-3,
-    print_every:    int   = 1,
-    logdir:         str   = None,
-    figdir:         str   = None,
-    modeldir:       str   = None,
+    optimizer: optim.Optimizer = None,
+    epochs: int = 50,
+    learning_rate: float = 1e-3,
+    print_every: int = 1,
+    logdir: str = None,
+    figdir: str = None,
+    modeldir: str = None,
 ):
     """
     Main seismic phase-picking training loop.
@@ -321,16 +353,16 @@ def train(
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     device = torch.device(device) if isinstance(device, str) else device
 
-    if loss_fn     is None: loss_fn     = default_phase_loss
-    if accuracy_fn is None: accuracy_fn = batch_f1_score
+    if loss_fn is None:
+        loss_fn = default_phase_loss
+    if accuracy_fn is None:
+        accuracy_fn = batch_f1_score
 
-    model      = model.to(device)
+    model = model.to(device)
     model_name = model.__class__.__name__
 
     if optimizer is None:
-        optimizer = optim.AdamW(
-            model.parameters(), lr=learning_rate, weight_decay=1e-4
-        )
+        optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
 
     scheduler = OneCycleLR(
         optimizer,
@@ -342,12 +374,12 @@ def train(
     )
 
     use_amp = device.type == "cuda"
-    scaler  = torch.amp.GradScaler("cuda", enabled=use_amp)
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
     train_losses, train_f1s = [], []
     valid_losses, valid_f1s = [], []
-    best_val_loss   = float("inf")
-    best_weights    = copy.deepcopy(model.state_dict())
+    best_val_loss = float("inf")
+    best_weights = copy.deepcopy(model.state_dict())
 
     print(f"Training {model_name} on {device} for {epochs} epochs…")
     start_time = time.time()
@@ -356,17 +388,29 @@ def train(
 
         # ── Train ─────────────────────────────────────────────────────────
         train_loss, train_f1 = run_epoch(
-            model, train_set, device, loss_fn, accuracy_fn,
-            optimizer=optimizer, scheduler=scheduler, scaler=scaler,
-            is_training=True, epoch_label=f"Train {epoch}/{epochs}",
+            model,
+            train_set,
+            device,
+            loss_fn,
+            accuracy_fn,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            scaler=scaler,
+            is_training=True,
+            epoch_label=f"Train {epoch}/{epochs}",
         )
         train_losses.append(train_loss)
         train_f1s.append(train_f1)
 
         # ── Validate ──────────────────────────────────────────────────────
         val_loss, val_f1 = run_epoch(
-            model, validation_set, device, loss_fn, accuracy_fn,
-            is_training=False, epoch_label=f"Val   {epoch}/{epochs}",
+            model,
+            validation_set,
+            device,
+            loss_fn,
+            accuracy_fn,
+            is_training=False,
+            epoch_label=f"Val   {epoch}/{epochs}",
         )
         valid_losses.append(val_loss)
         valid_f1s.append(val_f1)
@@ -374,7 +418,7 @@ def train(
         # ── Checkpoint ────────────────────────────────────────────────────
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_weights  = copy.deepcopy(model.state_dict())
+            best_weights = copy.deepcopy(model.state_dict())
 
         # ── Logging ───────────────────────────────────────────────────────
         if epoch % print_every == 0 or epoch == epochs:
@@ -394,8 +438,13 @@ def train(
     model.load_state_dict(best_weights)
     print(f"\nEvaluating {model_name} on test set…")
     test_loss, test_f1 = run_epoch(
-        model, test_set, device, loss_fn, accuracy_fn,
-        is_training=False, epoch_label="Test",
+        model,
+        test_set,
+        device,
+        loss_fn,
+        accuracy_fn,
+        is_training=False,
+        epoch_label="Test",
     )
     print(f"Test loss={test_loss:.4f} | Test f1={test_f1:.4f}")
 
@@ -403,9 +452,12 @@ def train(
     metrics = {
         "model": model_name,
         "epochs": epochs,
-        "train_losses": train_losses, "valid_losses": valid_losses,
-        "train_f1s":   train_f1s,   "valid_f1s":   valid_f1s,
-        "test_loss": test_loss,        "test_f1": test_f1,
+        "train_losses": train_losses,
+        "valid_losses": valid_losses,
+        "train_f1s": train_f1s,
+        "valid_f1s": valid_f1s,
+        "test_loss": test_loss,
+        "test_f1": test_f1,
     }
 
     if logdir is not None:
@@ -422,7 +474,8 @@ def train(
         print(f"Model saved to {path}")
 
     if figdir is not None:
-        plot_metrics(train_losses, valid_losses, train_f1s, valid_f1s,
-                     model_name, figdir)
+        plot_metrics(
+            train_losses, valid_losses, train_f1s, valid_f1s, model_name, figdir
+        )
 
     return model, metrics

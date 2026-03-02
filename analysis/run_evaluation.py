@@ -19,8 +19,10 @@ def _extract_p_s_predictions(preds):
     """
     if isinstance(preds, tuple):
         p_map, s_map = (preds[1], preds[2]) if len(preds) >= 3 else (preds[0], preds[1])
-        if p_map.ndim == 3: p_map = p_map.squeeze(1)
-        if s_map.ndim == 3: s_map = s_map.squeeze(1)
+        if p_map.ndim == 3:
+            p_map = p_map.squeeze(1)
+        if s_map.ndim == 3:
+            s_map = s_map.squeeze(1)
         return p_map.cpu(), s_map.cpu()
     preds = preds.cpu()
     return preds[:, 0, :], preds[:, 1, :]
@@ -53,23 +55,25 @@ def run_evaluation(
 
     model.to(device).eval()
 
-    predictions  = []
+    predictions = []
     ground_truth = []
 
     print("Running evaluation...")
     with torch.no_grad():
         for batch in tqdm(test_loader):
-            X   = batch["X"].to(device)
+            X = batch["X"].to(device)
             y_p = batch["y_p"]
             y_s = batch["y_s"]
 
-            if y_p.ndim == 3: y_p = y_p[:, 0, :]
-            if y_s.ndim == 3: y_s = y_s[:, 0, :]
+            if y_p.ndim == 3:
+                y_p = y_p[:, 0, :]
+            if y_s.ndim == 3:
+                y_s = y_s[:, 0, :]
 
-            p_true_max,    _ = torch.max(y_p, dim=1)
-            s_true_max,    _ = torch.max(y_s, dim=1)
-            p_true_sample    = torch.argmax(y_p, dim=1)
-            s_true_sample    = torch.argmax(y_s, dim=1)
+            p_true_max, _ = torch.max(y_p, dim=1)
+            s_true_max, _ = torch.max(y_s, dim=1)
+            p_true_sample = torch.argmax(y_p, dim=1)
+            s_true_sample = torch.argmax(y_s, dim=1)
 
             p_map, s_map = _extract_p_s_predictions(model(X))
             p_probs, p_pred_sample = torch.max(p_map, dim=1)
@@ -78,17 +82,37 @@ def run_evaluation(
             for i in range(X.shape[0]):
                 has_p = p_true_max[i].item() >= noise_threshold
                 has_s = s_true_max[i].item() >= noise_threshold
-                predictions.append({
-                    "p_wave": p_pred_sample[i].item() / sampling_rate if p_probs[i].item() >= confidence_threshold else np.nan,
-                    "s_wave": s_pred_sample[i].item() / sampling_rate if s_probs[i].item() >= confidence_threshold else np.nan,
-                })
-                ground_truth.append({
-                    "p_wave": p_true_sample[i].item() / sampling_rate if has_p else np.nan,
-                    "s_wave": s_true_sample[i].item() / sampling_rate if has_s else np.nan,
-                })
+                predictions.append(
+                    {
+                        "p_wave": (
+                            p_pred_sample[i].item() / sampling_rate
+                            if p_probs[i].item() >= confidence_threshold
+                            else np.nan
+                        ),
+                        "s_wave": (
+                            s_pred_sample[i].item() / sampling_rate
+                            if s_probs[i].item() >= confidence_threshold
+                            else np.nan
+                        ),
+                    }
+                )
+                ground_truth.append(
+                    {
+                        "p_wave": (
+                            p_true_sample[i].item() / sampling_rate if has_p else np.nan
+                        ),
+                        "s_wave": (
+                            s_true_sample[i].item() / sampling_rate if has_s else np.nan
+                        ),
+                    }
+                )
 
-    n_eq    = sum(1 for g in ground_truth if not (np.isnan(g["p_wave"]) and np.isnan(g["s_wave"])))
+    n_eq = sum(
+        1 for g in ground_truth if not (np.isnan(g["p_wave"]) and np.isnan(g["s_wave"]))
+    )
     n_noise = len(ground_truth) - n_eq
-    print(f"Evaluating {len(predictions)} traces ({n_eq} earthquake, {n_noise} noise)...")
+    print(
+        f"Evaluating {len(predictions)} traces ({n_eq} earthquake, {n_noise} noise)..."
+    )
 
     return evaluate_seismic_detection(predictions, ground_truth, tolerance=tolerance)
