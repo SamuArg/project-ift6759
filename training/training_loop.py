@@ -345,6 +345,7 @@ def train(
     logdir: str = None,
     figdir: str = None,
     modeldir: str = None,
+    use_amp: bool = None,
 ):
     """
     Main seismic phase-picking training loop.
@@ -367,6 +368,9 @@ def train(
     logdir         : directory for JSON training log; skipped if None.
     figdir         : directory for learning-curve plots; skipped if None.
     modeldir       : directory to save best model weights; skipped if None.
+    use_amp        : enable Automatic Mixed Precision (float16). Defaults to
+                     True on CUDA. Set False for models that use large masking
+                     constants incompatible with float16 (e.g. EQTransformer).
 
     Returns
     -------
@@ -396,7 +400,13 @@ def train(
         anneal_strategy="cos",
     )
 
-    use_amp = device.type == "cuda"
+    # AMP: auto-enable on CUDA unless caller explicitly opts out.
+    # EQTransformer must set use_amp=False because its encoder pads with -1e10
+    # which overflows float16 (max ≈ 65504).
+    if use_amp is None:
+        use_amp = device.type == "cuda"
+    if not use_amp and device.type == "cuda":
+        print("AMP disabled for this model (float16 incompatible).")
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
     train_losses = []
@@ -502,6 +512,11 @@ def train(
         path = os.path.join(modeldir, f"best_{model_name}.pth")
         torch.save(best_weights, path)
         print(f"Model saved to {path}")
+
+        if hasattr(model, "save"):
+            sb_path = os.path.join(modeldir, f"seisbench_{model_name}")
+            model.save(sb_path)
+            print(f"SeisBench native model saved to {sb_path}")
 
     if figdir is not None:
         plot_metrics(

@@ -15,8 +15,9 @@ from analysis.run_evaluation import run_evaluation
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG  ← edit to match what you want to evaluate
 # ─────────────────────────────────────────────────────────────────────────────
-MODEL_NAME = "phasenet"  # "base_lstm" | "phasenet" | "eqtransformer"
+MODEL_NAME = "eqtransformer"  # "base_lstm" | "phasenet" | "eqtransformer"
 DATASET = "stead"  # dataset to evaluate on
+MODEL_DATASET = "instance"
 
 # CHECKPOINT: path to a locally trained .pth file, or None to use the
 # pretrained SeisBench weights already loaded by build_model().
@@ -24,7 +25,8 @@ DATASET = "stead"  # dataset to evaluate on
 #   CHECKPOINT = None                                    # pretrained SeisBench
 #   CHECKPOINT = "training/test_outputs/models/best_SeismicPicker.pth"
 # CHECKPOINT = "training/test_outputs/models/best_SeismicPicker.pth"
-CHECKPOINT = None
+# CHECKPOINT = "test_outputs/models/best_base_lstm_instance_50_0.1.pth"
+CHECKPOINT = "test_outputs/models/best_eqtransformer_stead_10_0.1.pth"
 
 CONFIDENCE_THR = 0.3  # pick confidence threshold
 TOLERANCE_S = 0.1  # tolerance for TP counting (seconds)
@@ -38,8 +40,10 @@ PLOT_OUT = "test_outputs/figures/sample_predictions.png"
 # ── Model builders ────────────────────────────────────────────────────────────
 
 
-def build_model(model_name: str):
+def build_model(model_name: str, checkpoint: str = None):
     """Reconstruct the model architecture (must match what was trained)."""
+    is_sb_dir = checkpoint is not None and os.path.isdir(checkpoint)
+
     if model_name == "base_lstm":
         return (
             SeismicPicker(
@@ -53,11 +57,19 @@ def build_model(model_name: str):
         )
 
     elif model_name == "phasenet":
-        model = sbm.PhaseNet.from_pretrained("stead")
+        if is_sb_dir:
+            model = sbm.PhaseNet.load(checkpoint)
+            print(f"Loaded SeisBench native PhaseNet from {checkpoint}")
+        else:
+            model = sbm.PhaseNet.from_pretrained(MODEL_DATASET)
         return model, "phasenet"
 
     elif model_name == "eqtransformer":
-        model = sbm.EQTransformer.from_pretrained("instance")
+        if is_sb_dir:
+            model = sbm.EQTransformer.load(checkpoint)
+            print(f"Loaded SeisBench native EQTransformer from {checkpoint}")
+        else:
+            model = sbm.EQTransformer.from_pretrained(MODEL_DATASET)
         return model, "eqtransformer"
 
     raise ValueError(f"Unknown model: {model_name!r}")
@@ -72,6 +84,10 @@ def load_checkpoint(model, checkpoint):
     """
     if checkpoint is None:
         print("Using pretrained SeisBench weights (no local checkpoint).")
+        return model
+
+    if os.path.isdir(checkpoint):
+        # Already natively loaded by build_model
         return model
 
     if not os.path.exists(checkpoint):
@@ -259,20 +275,20 @@ if __name__ == "__main__":
     print(f"Device: {device}")
 
     # ── Model ─────────────────────────────────────────────────────────────
-    model, pipeline_type = build_model(MODEL_NAME)
+    model, pipeline_type = build_model(MODEL_NAME, checkpoint=CHECKPOINT)
     model = load_checkpoint(model, CHECKPOINT)
     model = model.to(device).eval()
 
     # ── Test dataloader ───────────────────────────────────────────────────
     print(f"\nLoading {DATASET.upper()} test split…")
     test_pipe = SeisBenchPipelineWrapper(
-        dataset_name=DATASET,
+        dataset_name=DATASET, dataset_fraction=1.0,
         split="test",
         model_type=pipeline_type,
         transformation_shape="gaussian",
         transformation_sigma=10,
     )
-    test_loader = test_pipe.get_dataloader(batch_size=32, num_workers=4, shuffle=False)
+    test_loader = test_pipe.get_dataloader(batch_size=128, num_workers=8, shuffle=False)
 
     # ── Evaluation ────────────────────────────────────────────────────────
     print(f"\nRunning seismic pick evaluation…")
@@ -288,7 +304,7 @@ if __name__ == "__main__":
     # ── Shuffled loader — gives representative, varied earthquake samples ──
     # shuffle=True ensures we don't always pick the same leading traces
     # (many of which may be noise or have arrivals clustered at one position).
-    plot_loader = test_pipe.get_dataloader(batch_size=32, num_workers=4, shuffle=True)
+    plot_loader = test_pipe.get_dataloader(batch_size=128, num_workers=8, shuffle=True)
 
     # ── Plot ──────────────────────────────────────────────────────────────
     print(f"\nPlotting {N_PLOT} earthquake sample predictions…")

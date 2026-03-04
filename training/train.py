@@ -30,15 +30,25 @@ import numpy as np
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG  ←  edit this block to switch model / dataset / hyperparameters
 # ─────────────────────────────────────────────────────────────────────────────
-MODEL = "base_lstm"  # "base_lstm" | "phasenet" | "eqtransformer"
+MODEL = "eqtransformer"  # "base_lstm" | "phasenet" | "eqtransformer"
 DATASET = "stead"  # "stead" | "instance" | "geofon" | "txed"
+
+# CHECKPOINT controls how the model is initialised before fine-tuning:
+#   None                  → base_lstm: random init
+#                           phasenet / eqtransformer: SeisBench default pretrained
+#   "instance"            → phasenet / eqtransformer: from_pretrained("instance")
+#   "stead"               → phasenet / eqtransformer: from_pretrained("stead")
+#   "path/to/weights.pth" → any model: load raw state-dict from local .pth file
+#   "path/to/sb_dir/"     → phasenet / eqtransformer: SeisBench .load() from dir
+CHECKPOINT = "instance"
+
 FRACTION = 0.1  # fraction of training data to use (1.0 = full)
 N_EPOCHS = 10
 MODEL_NAME = f"{MODEL}_{DATASET}_{N_EPOCHS}_{FRACTION}"
 BATCH_SIZE = 128
 LR = 1e-3
-SIGMA = 10  # Gaussian label width (samples)
-TYPE_LABEL = "gaussian"  # "gaussian" | "triangle"
+SIGMA = 20  # Gaussian label width (samples)
+TYPE_LABEL = "triangle"  # "gaussian" | "triangle"
 MAX_DISTANCE = 100
 
 LOGDIR = "test_outputs/logs"
@@ -53,31 +63,87 @@ np.random.seed(SEED)
 torch.cuda.manual_seed(SEED)
 
 
-def build_model(model_name: str) -> tuple[torch.nn.Module, str]:
+# Known SeisBench pretrained weight keys per model class.
+# Any string that is NOT an existing path is treated as a pretrained name.
+_SB_PRETRAINED = {
+    "phasenet":      ["stead", "instance", "geofon", "scedc", "ethz", "neic", "original"],
+    "eqtransformer": ["stead", "instance", "geofon", "scedc", "ethz", "neic", "original"],
+}
+
+
+def build_model(model_name: str, checkpoint: str = None) -> tuple[torch.nn.Module, str]:
     """
     Return (model, pipeline_model_type) where pipeline_model_type controls
     which window length and augmentations the pipeline uses.
+
+    CHECKPOINT resolution order (applies to phasenet / eqtransformer):
+      1. None              → from_pretrained(default)
+      2. existing dir path → SeisBench .load(checkpoint)
+      3. existing .pth     → from_pretrained(default) then load_state_dict(.pth)
+      4. plain string      → from_pretrained(checkpoint)  ← NEW: e.g. "instance"
     """
+    is_local_dir  = checkpoint is not None and os.path.isdir(checkpoint)
+    is_local_file = checkpoint is not None and os.path.isfile(checkpoint)
+    # A plain name like "instance" or "stead" that is NOT an existing path
+    is_sb_name    = (
+        checkpoint is not None
+        and not is_local_dir
+        and not is_local_file
+    )
+
     if model_name == "base_lstm":
-        # SeismicPicker: CNN + BiLSTM, 6000-sample windows (same as EQT)
         model = SeismicPicker(
             in_channels=3,
             base_channels=64,
-            lstm_hidden=32,
+            lstm_hidden=128,
             lstm_layers=2,
             dropout=0.2,
         )
         pipeline_type = "eqtransformer"  # 6000-sample window for this model
 
+        # For base_lstm checkpoint must be a local .pth (no SeisBench hub for it)
+        if is_local_file:
+            print(f"Loading base_lstm weights from {checkpoint} for fine-tuning…")
+            model.load_state_dict(
+                torch.load(checkpoint, map_location="cpu", weights_only=True)
+            )
+        elif checkpoint is not None:
+            raise ValueError(
+                f"base_lstm only supports a local .pth checkpoint, got: {checkpoint!r}"
+            )
+
     elif model_name == "phasenet":
-        # Pretrained PhaseNet from SeisBench — fine-tune on new dataset
-        model = sbm.PhaseNet.from_pretrained("stead")
-        pipeline_type = "phasenet"  # 3001-sample window
+        if is_local_dir:
+            model = sbm.PhaseNet.load(checkpoint)
+            print(f"Loaded PhaseNet (SeisBench dir) from {checkpoint}")
+        elif is_sb_name:
+            model = sbm.PhaseNet.from_pretrained(checkpoint)
+            print(f"Loaded PhaseNet from_pretrained({checkpoint!r})")
+        else:
+            # None → default pretrained; local .pth handled below
+            model = sbm.PhaseNet.from_pretrained("stead")
+            if is_local_file:
+                print(f"Loading PhaseNet weights from {checkpoint} for fine-tuning…")
+                model.load_state_dict(
+                    torch.load(checkpoint, map_location="cpu", weights_only=True)
+                )
+        pipeline_type = "phasenet"
 
     elif model_name == "eqtransformer":
-        # Pretrained EQTransformer from SeisBench — fine-tune on new dataset
-        model = sbm.EQTransformer.from_pretrained("instance")
-        pipeline_type = "eqtransformer"  # 6000-sample window + y_det label
+        if is_local_dir:
+            model = sbm.EQTransformer.load(checkpoint)
+            print(f"Loaded EQTransformer (SeisBench dir) from {checkpoint}")
+        elif is_sb_name:
+            model = sbm.EQTransformer.from_pretrained(checkpoint)
+            print(f"Loaded EQTransformer from_pretrained({checkpoint!r})")
+        else:
+            model = sbm.EQTransformer.from_pretrained("instance")
+            if is_local_file:
+                print(f"Loading EQTransformer weights from {checkpoint} for fine-tuning…")
+                model.load_state_dict(
+                    torch.load(checkpoint, map_location="cpu", weights_only=True)
+                )
+        pipeline_type = "eqtransformer"
 
     else:
         raise ValueError(
@@ -138,7 +204,9 @@ if __name__ == "__main__":
     print(f"Device: {device}")
 
     # ── Model ─────────────────────────────────────────────────────────────
-    model, pipeline_type = build_model(MODEL)
+    # All checkpoint loading (local .pth, SeisBench dir, pretrained name) is
+    # handled inside build_model — nothing extra needed here.
+    model, pipeline_type = build_model(MODEL, checkpoint=CHECKPOINT)
 
     # ── Data ──────────────────────────────────────────────────────────────
     train_loader, val_loader, test_loader = build_loaders(
@@ -152,6 +220,7 @@ if __name__ == "__main__":
     )
 
     # ── Train ─────────────────────────────────────────────────────────────
+    # EQTransformer pads with -1e10 which overflows float16 → disable AMP.
     model, metrics = train(
         model=model,
         train_set=train_loader,
@@ -165,6 +234,8 @@ if __name__ == "__main__":
         figdir=FIGDIR,
         modeldir=MODELDIR,
         model_name=MODEL_NAME,
+        use_amp=(MODEL != "eqtransformer"),
+
     )
 
     # ── Seismic evaluation (F1, MSE, Precision/Recall) ────────────────────
