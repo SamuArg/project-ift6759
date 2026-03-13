@@ -30,26 +30,110 @@ import numpy as np
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG  ←  edit this block to switch model / dataset / hyperparameters
 # ─────────────────────────────────────────────────────────────────────────────
-MODEL = "eqtransformer"  # "base_lstm" | "phasenet" | "eqtransformer"
-DATASET = "stead"  # "stead" | "instance" | "geofon" | "txed"
 
-# CHECKPOINT controls how the model is initialised before fine-tuning:
-#   None                  → base_lstm: random init
-#                           phasenet / eqtransformer: SeisBench default pretrained
-#   "instance"            → phasenet / eqtransformer: from_pretrained("instance")
-#   "stead"               → phasenet / eqtransformer: from_pretrained("stead")
-#   "path/to/weights.pth" → any model: load raw state-dict from local .pth file
-#   "path/to/sb_dir/"     → phasenet / eqtransformer: SeisBench .load() from dir
-CHECKPOINT = "instance"
+# model : "base_lstm" | "phasenet" | "eqtransformer"
+# dataset : "stead" | "instance" | "geofon" | "txed"
+# checkpoint : See build_model() for resolution order. Examples:
+#   None                  → base_lstm: random init; phasenet/eqtransformer: default pretrained
+#   "instance"            → phasenet/eqtransformer: from_pretrained("instance")
+#   "stead"               → phasenet/eqtransformer: from_pretrained("stead")
+#   "path/to/weights.pth" → any model: load_state_dict from local .pth file
+#   "path/to/sb_dir/"     → phasenet/eqtransformer: SeisBench .load() from local dir
 
-FRACTION = 0.1  # fraction of training data to use (1.0 = full)
-N_EPOCHS = 10
-MODEL_NAME = f"{MODEL}_{DATASET}_{N_EPOCHS}_{FRACTION}"
-BATCH_SIZE = 128
-LR = 1e-3
-SIGMA = 20  # Gaussian label width (samples)
-TYPE_LABEL = "triangle"  # "gaussian" | "triangle"
-MAX_DISTANCE = 100
+"""    {
+        "model": "base_lstm",
+        "dataset": "instance",
+        "checkpoint": None,
+        "fraction": 1.0,
+        "n_epochs": 10,
+        "model_name": "base_lstm_instance_10_epochs_full_h128_d0.2",
+        "batch_size": 128,
+        "learning_rate": 1e-3,
+        "sigma": 10,
+        "type_label": "gaussian",
+        "max_distance": 100,
+        "lstm_hidden": 128,
+        "dropout": 0.2,
+    },
+    {
+        "model": "base_lstm",
+        "dataset": "instance",
+        "checkpoint": None,
+        "fraction": 1.0,
+        "n_epochs": 10,
+        "model_name": "base_lstm_instance_10_epochs_full_h64_d0",
+        "batch_size": 128,
+        "learning_rate": 1e-3,
+        "sigma": 10,
+        "type_label": "gaussian",
+        "max_distance": 100,
+        "lstm_hidden": 64,
+        "dropout": 0,
+    },"""
+
+
+configs = [
+    {
+        "model": "base_lstm",
+        "dataset": "instance",
+        "checkpoint": None,
+        "fraction": 1.0,
+        "n_epochs": 10,
+        "model_name": "base_lstm_instance_10_epochs_full_h32_d0",
+        "batch_size": 128,
+        "learning_rate": 1e-3,
+        "sigma": 10,
+        "type_label": "gaussian",
+        "max_distance": 100,
+        "lstm_hidden": 32,
+        "dropout": 0,
+    },
+    {
+        "model": "base_lstm",
+        "dataset": "instance",
+        "checkpoint": None,
+        "fraction": 1.0,
+        "n_epochs": 10,
+        "model_name": "base_lstm_instance_10_epochs_full_h32_d0.2",
+        "batch_size": 128,
+        "learning_rate": 1e-3,
+        "sigma": 10,
+        "type_label": "gaussian",
+        "max_distance": 100,
+        "lstm_hidden": 32,
+        "dropout": 0.2,
+    },
+    {
+        "model": "base_lstm",
+        "dataset": "instance",
+        "checkpoint": None,
+        "fraction": 1.0,
+        "n_epochs": 10,
+        "model_name": "base_lstm_instance_10_epochs_full_h64_d0.2",
+        "batch_size": 128,
+        "learning_rate": 1e-3,
+        "sigma": 10,
+        "type_label": "gaussian",
+        "max_distance": 100,
+        "lstm_hidden": 64,
+        "dropout": 0.2,
+    },
+    {
+        "model": "base_lstm",
+        "dataset": "instance",
+        "checkpoint": None,
+        "fraction": 1.0,
+        "n_epochs": 10,
+        "model_name": "base_lstm_instance_10_epochs_full_h128_d0",
+        "batch_size": 128,
+        "learning_rate": 1e-3,
+        "sigma": 10,
+        "type_label": "gaussian",
+        "max_distance": 100,
+        "lstm_hidden": 128,
+        "dropout": 0,
+    },
+]
 
 LOGDIR = "test_outputs/logs"
 FIGDIR = "test_outputs/figures"
@@ -71,7 +155,7 @@ _SB_PRETRAINED = {
 }
 
 
-def build_model(model_name: str, checkpoint: str = None) -> tuple[torch.nn.Module, str]:
+def build_model(model_name: str, checkpoint: str = None, lstm_hidden: int = 128, dropout: float = 0.2) -> tuple[torch.nn.Module, str]:
     """
     Return (model, pipeline_model_type) where pipeline_model_type controls
     which window length and augmentations the pipeline uses.
@@ -95,9 +179,9 @@ def build_model(model_name: str, checkpoint: str = None) -> tuple[torch.nn.Modul
         model = SeismicPicker(
             in_channels=3,
             base_channels=64,
-            lstm_hidden=128,
+            lstm_hidden=lstm_hidden,
             lstm_layers=2,
-            dropout=0.2,
+            dropout=dropout,
         )
         pipeline_type = "eqtransformer"  # 6000-sample window for this model
 
@@ -199,47 +283,38 @@ def build_loaders(
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
+def main(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
-
-    # ── Model ─────────────────────────────────────────────────────────────
-    # All checkpoint loading (local .pth, SeisBench dir, pretrained name) is
-    # handled inside build_model — nothing extra needed here.
-    model, pipeline_type = build_model(MODEL, checkpoint=CHECKPOINT)
-
-    # ── Data ──────────────────────────────────────────────────────────────
+    
+    model, pipeline_type = build_model(config["model"], checkpoint=config["checkpoint"], lstm_hidden=config.get("lstm_hidden", 128), dropout=config.get("dropout", 0.2))
     train_loader, val_loader, test_loader = build_loaders(
-        dataset=DATASET,
+        dataset=config["dataset"],
         pipeline_type=pipeline_type,
-        fraction=FRACTION,
-        batch_size=BATCH_SIZE,
-        sigma=SIGMA,
-        type_label=TYPE_LABEL,
-        max_distance=MAX_DISTANCE,
+        fraction=config["fraction"],
+        batch_size=config["batch_size"],
+        sigma=config["sigma"],
+        type_label=config["type_label"],
+        max_distance=config["max_distance"],
     )
 
-    # ── Train ─────────────────────────────────────────────────────────────
-    # EQTransformer pads with -1e10 which overflows float16 → disable AMP.
     model, metrics = train(
         model=model,
         train_set=train_loader,
         validation_set=val_loader,
         test_set=test_loader,
         device=device,
-        epochs=N_EPOCHS,
-        learning_rate=LR,
+        epochs=config["n_epochs"],
+        learning_rate=config["learning_rate"],
         print_every=1,
         logdir=LOGDIR,
         figdir=FIGDIR,
         modeldir=MODELDIR,
-        model_name=MODEL_NAME,
-        use_amp=(MODEL != "eqtransformer"),
-
+        model_name=config["model_name"],
+        use_amp=(config["model"] != "eqtransformer"),
     )
+    print(f"\nRunning seismic pick evaluation on {config['dataset'].upper()} test split…")
 
-    # ── Seismic evaluation (F1, MSE, Precision/Recall) ────────────────────
-    print(f"\nRunning seismic pick evaluation on {DATASET.upper()} test split…")
     results = run_evaluation(
         model=model,
         test_loader=test_loader,
@@ -248,3 +323,8 @@ if __name__ == "__main__":
         tolerance=0.1,  # ±0.1 s = ±10 samples at 100 Hz
         device=device,
     )
+if __name__ == "__main__":
+
+    for config in configs:
+        print(f"\n{'='*40}\nRunning config: {config['model_name']}\n{'='*40}")
+        main(config)

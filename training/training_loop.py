@@ -108,11 +108,12 @@ def default_phase_loss(
     """
     Weighted BCE loss, supporting all model types:
 
-      - SeismicPicker / PhaseNet: loss = BCE(pred_p, tgt_p) + BCE(pred_s, tgt_s)
-      - EQTransformer (3-tuple):  loss += BCE(pred_det, tgt_det) when tgt_det given
+      - SeismicPicker (post-fix): outputs raw logits → passed directly to
+        BCEWithLogitsLoss (no sigmoid→logit round-trip).
+      - PhaseNet / EQTransformer: outputs probabilities (sigmoid applied
+        internally by SeisBench) → converted back to logits via torch.logit.
 
-    Uses binary_cross_entropy_with_logits (AMP-safe) by converting sigmoid
-    probabilities back to logits via torch.logit.
+    Detection head (EQTransformer only) is always probability-valued.
     """
     pos_w = torch.tensor(pos_weight_factor, device=targets_p.device)
 
@@ -122,10 +123,20 @@ def default_phase_loss(
             pred = pred.squeeze(1)
         if target.ndim == 3:
             target = target.squeeze(1)
+        pred = pred.float()
+        target = target.float()
         weight = 1 + (pos_w - 1) * target
-        logits = torch.logit(pred.float().clamp(1e-6, 1 - 1e-6))
+        # Detect whether pred is already in logit space (SeismicPicker) or
+        # probability space (SeisBench models that apply sigmoid internally).
+        # Values outside [0, 1] can only be logits.
+        if pred.min() < 0.0 or pred.max() > 1.0:
+            # Already logits — pass directly (numerically optimal path)
+            logits = pred
+        else:
+            # Probabilities — invert sigmoid to get logits (SeisBench models)
+            logits = torch.logit(pred.clamp(1e-6, 1 - 1e-6))
         return torch.nn.functional.binary_cross_entropy_with_logits(
-            logits, target.float(), weight=weight
+            logits, target, weight=weight
         )
 
     prob_p, prob_s = _unpack_predictions(outputs)
@@ -172,8 +183,13 @@ def batch_f1_score(
 
     def _phase_counts(prob, label):
         label = label.float().cpu() if isinstance(label, torch.Tensor) else label
+        # argmax is invariant to strictly-monotone transforms (e.g. sigmoid),
+        # so it is safe on both logits and probabilities.
         pred_sample = prob.argmax(dim=1)
-        pred_conf = prob.max(dim=1).values
+        # The confidence threshold lives in probability space [0, 1].
+        # If the model returned logits (any value < 0), convert to probs first.
+        prob_for_thresh = torch.sigmoid(prob) if prob.min() < 0.0 else prob
+        pred_conf = prob_for_thresh.max(dim=1).values
         true_sample = label.argmax(dim=1)
         has_gt = label.max(dim=1).values > noise_threshold
         has_pred = pred_conf > confidence_threshold

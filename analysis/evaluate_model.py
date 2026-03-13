@@ -16,7 +16,7 @@ from analysis.run_evaluation import run_evaluation
 # CONFIG  ← edit to match what you want to evaluate
 # ─────────────────────────────────────────────────────────────────────────────
 MODEL_NAME = "eqtransformer"  # "base_lstm" | "phasenet" | "eqtransformer"
-DATASET = "stead"  # dataset to evaluate on
+DATASET = "instance"  # dataset to evaluate on
 MODEL_DATASET = "instance"
 
 # CHECKPOINT: path to a locally trained .pth file, or None to use the
@@ -25,15 +25,17 @@ MODEL_DATASET = "instance"
 #   CHECKPOINT = None                                    # pretrained SeisBench
 #   CHECKPOINT = "training/test_outputs/models/best_SeismicPicker.pth"
 # CHECKPOINT = "training/test_outputs/models/best_SeismicPicker.pth"
-# CHECKPOINT = "test_outputs/models/best_base_lstm_instance_50_0.1.pth"
-CHECKPOINT = "test_outputs/models/best_eqtransformer_stead_10_0.1.pth"
+#CHECKPOINT = "test_outputs/models/best_base_lstm_instance_25_1.0_v2.pth"
+CHECKPOINT = None
 
-CONFIDENCE_THR = 0.3  # pick confidence threshold
+CONFIDENCE_THR = 0.5  # pick confidence threshold
 TOLERANCE_S = 0.1  # tolerance for TP counting (seconds)
 SAMPLING_RATE = 100  # Hz
 
 N_PLOT = 8  # number of example traces to plot
 PLOT_OUT = "test_outputs/figures/sample_predictions.png"
+N_MISSED = 6  # missed-detection examples per phase
+MISSED_PLOT_OUT = "test_outputs/figures/missed_detections.png"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -53,7 +55,7 @@ def build_model(model_name: str, checkpoint: str = None):
                 lstm_layers=2,
                 dropout=0.2,
             ),
-            "phasenet",
+            "eqtransformer",  # 6000-sample window — must match train.py build_model()
         )
 
     elif model_name == "phasenet":
@@ -108,8 +110,9 @@ def load_checkpoint(model, checkpoint):
 @torch.no_grad()
 def predict_batch(model, batch, device):
     """
-    Return (prob_p, prob_s) — each (B, T) on CPU — for a SeisBench dict-batch.
-    Handles all three output formats.
+    Return (prob_p, prob_s) — each (B, T) in probability space on CPU — for a
+    SeisBench dict-batch.  Handles all three output formats, including the
+    SeismicPicker which now returns raw logits from forward().
     """
     x = batch["X"].to(device)
     out = model(x)
@@ -117,7 +120,7 @@ def predict_batch(model, batch, device):
     if isinstance(out, tuple):
         if len(out) >= 3:  # EQTransformer (det, p, s)
             p, s = out[1], out[2]
-        else:  # SeismicPicker  (p, s)
+        else:  # SeismicPicker  (logit_p, logit_s) or (prob_p, prob_s)
             p, s = out[0], out[1]
     else:  # PhaseNet tensor (B, 3, T)
         p, s = out[:, 0, :], out[:, 1, :]
@@ -127,7 +130,15 @@ def predict_batch(model, batch, device):
         p = p.squeeze(1)
     if s.ndim == 3:
         s = s.squeeze(1)
-    return p.float().cpu(), s.float().cpu()
+
+    p = p.float().cpu()
+    s = s.float().cpu()
+    # If values are outside [0, 1] the model returned logits — convert to probs.
+    if p.min() < 0.0 or p.max() > 1.0:
+        p = torch.sigmoid(p)
+    if s.min() < 0.0 or s.max() > 1.0:
+        s = torch.sigmoid(s)
+    return p, s
 
 
 # ── Plotting ──────────────────────────────────────────────────────────────────
@@ -266,6 +277,187 @@ def plot_predictions(
     print(f"Plot saved to {out_path}")
 
 
+# ── Missed-detection plotting ─────────────────────────────────────────────────
+
+
+def plot_missed_detections(
+    model,
+    plot_loader,
+    device,
+    n=6,
+    confidence_thr=0.3,
+    noise_threshold=0.1,
+    sampling_rate=100,
+    out_path=None,
+):
+    """
+    Find traces where a ground-truth P or S arrival exists but the model's
+    probability *never* crosses `confidence_thr` (false negatives = low recall).
+
+    Produces a figure with two sections:
+      • Top rows  — missed P-wave examples
+      • Bottom rows — missed S-wave examples
+    Each example gets a waveform row and a probability-curve row.
+    """
+    model.eval()
+    missed_p = []   # list of dicts: traces where GT-P exists but P not detected
+    missed_s = []   # list of dicts: traces where GT-S exists but S not detected
+
+    def gt_sample(label_tensor):
+        """Return (has_pick bool, peak_sample int) for each item in the batch."""
+        if label_tensor.ndim == 3:
+            ch0 = label_tensor[:, 0, :]           # (B, T)
+        else:
+            ch0 = label_tensor                     # (B, T)
+        has_pick = ch0.max(dim=1).values > noise_threshold
+        peak = ch0.argmax(dim=1).float()
+        return has_pick, peak                      # (B,), (B,)
+
+    with torch.no_grad():
+        for batch in plot_loader:
+            if len(missed_p) >= n and len(missed_s) >= n:
+                break
+
+            prob_p, prob_s = predict_batch(model, batch, device)
+            B = prob_p.shape[0]
+
+            has_p, peak_p = gt_sample(batch["y_p"])
+            has_s, peak_s = gt_sample(batch["y_s"])
+
+            for i in range(B):
+                wv = batch["X"][i].numpy()          # (3, T)
+                pp = prob_p[i].numpy()              # (T,)
+                ps = prob_s[i].numpy()              # (T,)
+
+                # ── Missed P ──────────────────────────────────────────────
+                if len(missed_p) < n and has_p[i].item():
+                    if pp.max() < confidence_thr:   # model never fired for P
+                        missed_p.append({
+                            "waveform": wv,
+                            "prob_p": pp,
+                            "prob_s": ps,
+                            "gt_p": peak_p[i].item(),
+                            "gt_s": peak_s[i].item() if has_s[i].item() else float("nan"),
+                            "phase": "P",
+                        })
+
+                # ── Missed S ──────────────────────────────────────────────
+                if len(missed_s) < n and has_s[i].item():
+                    if ps.max() < confidence_thr:   # model never fired for S
+                        missed_s.append({
+                            "waveform": wv,
+                            "prob_p": pp,
+                            "prob_s": ps,
+                            "gt_p": peak_p[i].item() if has_p[i].item() else float("nan"),
+                            "gt_s": peak_s[i].item(),
+                            "phase": "S",
+                        })
+
+    if not missed_p and not missed_s:
+        print("No missed detections found in the sampled batches — recall may be high!")
+        return
+
+    print(f"Missed P examples found: {len(missed_p)}, missed S examples found: {len(missed_s)}")
+
+    # ── Layout: missed-P section then missed-S section ─────────────────────────
+    all_groups = []
+    if missed_p:
+        all_groups.append(("Missed P-wave detections", missed_p, "#e63946", "#457b9d"))
+    if missed_s:
+        all_groups.append(("Missed S-wave detections", missed_s, "#e63946", "#457b9d"))
+
+    cols = min(3, max(len(g[1]) for g in all_groups))
+    rows_per_group = 2   # waveform + prob
+    n_groups = len(all_groups)
+    total_rows = rows_per_group * n_groups
+
+    # Each group occupies a contiguous block of rows separated by a header
+    fig = plt.figure(figsize=(cols * 5, total_rows * 3 + n_groups * 0.6))
+    fig.suptitle(
+        f"Missed detections  (confidence thr = {confidence_thr})",
+        fontsize=13, y=1.01,
+    )
+
+    T = None
+    # We'll collect all axes per group manually
+    subplot_index = 1         # 1-based index into the total grid
+    grid_rows = total_rows    # total subplot rows
+
+    for g_idx, (title, examples, col_p, col_s) in enumerate(all_groups):
+        n_ex = min(len(examples), cols)
+        row_w = g_idx * rows_per_group + 1   # 1-indexed waveform row
+        row_p = row_w + 1                    # probability row
+
+        for ex_idx, item in enumerate(examples[:cols]):
+            col_idx = ex_idx + 1             # 1-indexed column
+
+            ax_w  = fig.add_subplot(grid_rows, cols, (row_w - 1) * cols + col_idx)
+            ax_pp = fig.add_subplot(grid_rows, cols, (row_p - 1) * cols + col_idx)
+
+            wv = item["waveform"]
+            if T is None:
+                T = wv.shape[1]
+            t = np.arange(wv.shape[1]) / sampling_rate
+
+            # ── Waveform ─────────────────────────────────────────────────
+            channel_labels = ["Z", "N", "E"]
+            colors_wv = ["#2d6a9f", "#3a9e6a", "#c97d2b"]
+            for ch in range(min(3, wv.shape[0])):
+                offset = ch * 2.5
+                norm = np.abs(wv[ch]).max() + 1e-9
+                ax_w.plot(
+                    t, wv[ch] / norm + offset,
+                    lw=0.7, color=colors_wv[ch], label=channel_labels[ch],
+                )
+
+            gt_p_t = item["gt_p"] / sampling_rate
+            gt_s_t = item["gt_s"] / sampling_rate
+            missed_phase = item["phase"]
+
+            if not np.isnan(gt_p_t):
+                ax_w.axvline(gt_p_t, color="#e63946", ls="--", lw=1.4, alpha=0.9, label="GT P")
+            if not np.isnan(gt_s_t):
+                ax_w.axvline(gt_s_t, color="#457b9d", ls="--", lw=1.4, alpha=0.9, label="GT S")
+
+            ax_w.set_yticks([])
+            ax_w.set_xlim(t[0], t[-1])
+            ax_w.legend(loc="upper right", fontsize=6, ncol=5)
+            ax_w.set_title(
+                f"[{title}] ex {ex_idx+1}  GT-P={gt_p_t:.1f}s  GT-S={gt_s_t:.1f}s",
+                fontsize=7,
+            )
+
+            # ── Probability curves ────────────────────────────────────────
+            ax_pp.plot(t, item["prob_p"], color="#e63946", lw=1.3, label="P prob")
+            ax_pp.plot(t, item["prob_s"], color="#457b9d", lw=1.3, label="S prob")
+            ax_pp.axhline(
+                confidence_thr, color="gray", ls=":", lw=0.9,
+                label=f"thr={confidence_thr}",
+            )
+            if not np.isnan(gt_p_t):
+                ax_pp.axvline(gt_p_t, color="#e63946", ls="--", lw=1.2, alpha=0.7)
+            if not np.isnan(gt_s_t):
+                ax_pp.axvline(gt_s_t, color="#457b9d", ls="--", lw=1.2, alpha=0.7)
+
+            # Shade the missed phase
+            missed_col = "#e63946" if missed_phase == "P" else "#457b9d"
+            missed_curve = item["prob_p"] if missed_phase == "P" else item["prob_s"]
+            ax_pp.fill_between(t, 0, missed_curve, color=missed_col, alpha=0.15,
+                               label=f"missed {missed_phase} fill")
+
+            ax_pp.set_ylim(-0.05, 1.05)
+            ax_pp.set_xlim(t[0], t[-1])
+            ax_pp.set_ylabel("Prob", fontsize=8)
+            ax_pp.set_xlabel("Time (s)", fontsize=8)
+            ax_pp.legend(loc="upper right", fontsize=6)
+
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Missed-detection plot saved to {out_path}")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
@@ -279,6 +471,8 @@ if __name__ == "__main__":
     model = load_checkpoint(model, CHECKPOINT)
     model = model.to(device).eval()
 
+    print(f"Number of model parameters: {sum(p.numel() for p in model.parameters()):,}")
+
     # ── Test dataloader ───────────────────────────────────────────────────
     print(f"\nLoading {DATASET.upper()} test split…")
     test_pipe = SeisBenchPipelineWrapper(
@@ -287,6 +481,7 @@ if __name__ == "__main__":
         model_type=pipeline_type,
         transformation_shape="gaussian",
         transformation_sigma=10,
+        max_distance=100,
     )
     test_loader = test_pipe.get_dataloader(batch_size=128, num_workers=8, shuffle=False)
 
@@ -316,4 +511,17 @@ if __name__ == "__main__":
         confidence_thr=CONFIDENCE_THR,
         sampling_rate=SAMPLING_RATE,
         out_path=PLOT_OUT,
+    )
+
+    # ── Missed-detection plot ─────────────────────────────────────────────
+    print(f"\nSearching for missed detections (recall failures)…")
+    plot_missed_detections(
+        model=model,
+        plot_loader=plot_loader,
+        device=device,
+        n=N_MISSED,
+        confidence_thr=CONFIDENCE_THR,
+        noise_threshold=0.1,
+        sampling_rate=SAMPLING_RATE,
+        out_path=MISSED_PLOT_OUT,
     )

@@ -10,12 +10,13 @@ except ImportError:
 
 def _extract_p_s_predictions(preds):
     """
-    Unpack model output into (p_prob_map, s_prob_map) tensors of shape [B, T].
+    Unpack model output into (p_prob_map, s_prob_map) tensors of shape [B, T],
+    always in probability space [0, 1].
 
     Handles:
       - PhaseNet        → tensor [B, 3, T]  (channel 0=P, 1=S, 2=noise)
       - EQTransformer   → tuple (detection [B,T], p [B,T], s [B,T])
-      - SeismicPicker   → tuple (p [B,T], s [B,T])
+      - SeismicPicker   → tuple (logit_p [B,T], logit_s [B,T])  ← logits post-fix
     """
     if isinstance(preds, tuple):
         p_map, s_map = (preds[1], preds[2]) if len(preds) >= 3 else (preds[0], preds[1])
@@ -23,9 +24,19 @@ def _extract_p_s_predictions(preds):
             p_map = p_map.squeeze(1)
         if s_map.ndim == 3:
             s_map = s_map.squeeze(1)
-        return p_map.cpu(), s_map.cpu()
-    preds = preds.cpu()
-    return preds[:, 0, :], preds[:, 1, :]
+    else:
+        preds = preds.cpu()
+        p_map, s_map = preds[:, 0, :], preds[:, 1, :]
+
+    p_map = p_map.cpu().float()
+    s_map = s_map.cpu().float()
+    # If values are outside [0, 1] the model returned logits — convert to probs.
+    if p_map.min() < 0.0 or p_map.max() > 1.0:
+        p_map = torch.sigmoid(p_map)
+    if s_map.min() < 0.0 or s_map.max() > 1.0:
+        s_map = torch.sigmoid(s_map)
+    return p_map, s_map
+
 
 
 def run_evaluation(

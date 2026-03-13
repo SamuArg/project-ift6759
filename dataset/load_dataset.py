@@ -58,6 +58,41 @@ class SeisBenchPipelineWrapper:
         elif self.split == "test":
             self.dataset = dataset.test()
 
+        # ── Drop traces that have a P pick but no S pick ─────────────────────
+        # Pure noise traces (no P, no S) are kept for detection learning.
+        # Only ambiguous traces (P present, S missing) are dropped.
+        s_col_candidates = ["trace_s_arrival_sample", "trace_S_arrival_sample"]
+        p_col_candidates = ["trace_p_arrival_sample", "trace_P_arrival_sample"]
+        s_col = next(
+            (c for c in s_col_candidates if c in self.dataset.metadata.columns), None
+        )
+        p_col_meta = next(
+            (c for c in p_col_candidates if c in self.dataset.metadata.columns), None
+        )
+        if s_col is not None and p_col_meta is not None:
+            has_s = self.dataset.metadata[s_col].notna().values
+            has_p = self.dataset.metadata[p_col_meta].notna().values
+            # Keep: has S  OR  is noise (no P and no S)
+            keep = has_s | ~has_p
+            n_before = len(self.dataset)
+            self.dataset.filter(keep)
+            n_dropped = n_before - keep.sum()
+            print(
+                f"Dropped {n_dropped} traces with P but no S annotation "
+                f"({keep.sum()} remain, noise traces preserved)."
+            )
+        elif s_col is not None:
+            # Fallback: no P column available, use old behaviour
+            has_s = self.dataset.metadata[s_col].notna().values
+            n_before = len(self.dataset)
+            self.dataset.filter(has_s)
+            print(
+                f"Dropped {n_before - has_s.sum()} traces without S annotation "
+                f"({has_s.sum()} remain)."
+            )
+        else:
+            print("Warning: no S-arrival column found — skipping S-filter.")
+
         if self.max_distance is not None and self.dataset_name in ["STEAD", "INSTANCE"]:
             possible_cols = ["path_hyp_distance_km", "source_distance_km"]
             dist_col = next(

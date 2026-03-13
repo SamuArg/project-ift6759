@@ -3,10 +3,12 @@ Seismic Phase Picker: CNN + BiLSTM for P-wave and S-wave arrival detection
 Designed for STEAD and INSTANCE datasets.
 
 Architecture overview:
-    Raw 3C waveform → Conv1D encoder → BiLSTM → dual sigmoid heads (P + S)
+    Raw 3C waveform → Conv1D encoder → BiLSTM → dual linear heads (P + S)
 
-Output: two probability vectors of shape (batch, seq_len) — one per phase.
-        Each value is the probability that the sample is the arrival onset.
+Output: two **logit** vectors of shape (batch, seq_len) — one per phase.
+        Call .sigmoid() or use SeismicPicker.predict() to get probabilities.
+        Returning logits lets the loss use BCEWithLogitsLoss directly, avoiding
+        the numerically suboptimal sigmoid → clamp → logit round-trip.
 """
 
 import numpy as np
@@ -85,7 +87,10 @@ class SeismicPicker(nn.Module):
         → Two Conv1d heads      : independent P and S heads — shared backbone for
                                   common features, separate heads for distinct decisions
         → Linear upsample       : 1500 → 6000 via interpolation (no checkerboard artifacts)
-        → Sigmoid               : outputs are per-sample arrival probabilities
+
+    forward() returns raw **logits** (pre-sigmoid) so that BCEWithLogitsLoss can
+    be applied directly without a sigmoid→logit round-trip.  Call predict() or
+    apply .sigmoid() explicitly when you need probabilities.
     """
 
     def __init__(
@@ -155,8 +160,10 @@ class SeismicPicker(nn.Module):
             x: (B, 3, 6000) — normalized 3-component waveform from SeisBench
 
         Returns:
-            prob_p: (B, 6000) — P-wave arrival probability per sample
-            prob_s: (B, 6000) — S-wave arrival probability per sample
+            logit_p: (B, 6000) — P-wave raw logits (pre-sigmoid)
+            logit_s: (B, 6000) — S-wave raw logits (pre-sigmoid)
+
+        Use predict() or .sigmoid() to obtain probabilities.
         """
         B, C, L = x.shape
 
@@ -172,21 +179,30 @@ class SeismicPicker(nn.Module):
         logit_p = self.head_p(x).squeeze(1)  # (B, 1500)
         logit_s = self.head_s(x).squeeze(1)  # (B, 1500)
 
-        # Upsample to original length
-        # WHY interpolation not transposed conv: smooth probability curves,
-        # no checkerboard artifacts, no extra parameters needed
-        prob_p = torch.sigmoid(
-            F.interpolate(
-                logit_p.unsqueeze(1), size=L, mode="linear", align_corners=False
-            ).squeeze(1)
-        )
-        prob_s = torch.sigmoid(
-            F.interpolate(
-                logit_s.unsqueeze(1), size=L, mode="linear", align_corners=False
-            ).squeeze(1)
-        )
+        # Upsample to original length.
+        # WHY interpolation not transposed conv: smooth curves, no checkerboard
+        # artifacts, no extra parameters needed. Upsample *logits* before sigmoid
+        # so the sigmoid is only applied once at inference / in the loss.
+        logit_p = F.interpolate(
+            logit_p.unsqueeze(1), size=L, mode="linear", align_corners=False
+        ).squeeze(1)  # (B, 6000)
+        logit_s = F.interpolate(
+            logit_s.unsqueeze(1), size=L, mode="linear", align_corners=False
+        ).squeeze(1)  # (B, 6000)
 
-        return prob_p, prob_s  # each (B, 6000)
+        return logit_p, logit_s  # raw logits — each (B, 6000)
+
+    def predict(self, x: torch.Tensor):
+        """
+        Convenience wrapper: returns sigmoid probabilities instead of logits.
+        Equivalent to calling sigmoid(forward(x)).
+
+        Returns:
+            prob_p: (B, 6000) — P-wave arrival probability
+            prob_s: (B, 6000) — S-wave arrival probability
+        """
+        logit_p, logit_s = self.forward(x)
+        return torch.sigmoid(logit_p), torch.sigmoid(logit_s)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -198,7 +214,7 @@ def phase_loss(
     pred: torch.Tensor, target: torch.Tensor, pos_weight_factor: float = 10.0
 ) -> torch.Tensor:
     """
-    Weighted Binary Cross-Entropy.
+    Weighted Binary Cross-Entropy for **logit** inputs.
 
     WHY BCE not MSE: target is a probability distribution (Gaussian-shaped),
     so BCE is the correct divergence. MSE over-penalises large deviations and
@@ -210,18 +226,15 @@ def phase_loss(
     pos_weight_factor=10 is a starting point — raise if you miss too many picks,
     lower if you get too many false positives.
 
-    WHY binary_cross_entropy_with_logits instead of binary_cross_entropy:
-    F.binary_cross_entropy is unsafe with AMP (autocast) because float16 can
-    produce NaN/Inf inside the log. BCEWithLogitsLoss fuses sigmoid + log into a
-    numerically stable log-sum-exp computation that is AMP-safe.
-    We convert our sigmoid probabilities back to logits first; the result is
-    mathematically identical to the original BCE but compatible with autocast.
+    WHY binary_cross_entropy_with_logits and not binary_cross_entropy:
+    BCEWithLogitsLoss fuses sigmoid + log into a numerically stable log-sum-exp
+    computation, safe under AMP (float16). The caller must pass raw logits — this
+    avoids the old sigmoid → clamp → logit round-trip that was numerically imprecise.
     """
     pos_weight = torch.tensor(pos_weight_factor, device=pred.device)
     weight = 1 + (pos_weight - 1) * target
-    # Clamp avoids logit(-inf/+inf) for perfectly saturated sigmoid outputs
-    logits = torch.logit(pred.clamp(min=1e-6, max=1 - 1e-6))
-    return F.binary_cross_entropy_with_logits(logits, target, weight=weight)
+    # pred is expected to be raw logits from SeismicPicker.forward()
+    return F.binary_cross_entropy_with_logits(pred, target, weight=weight)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -279,7 +292,13 @@ def predict_single(model: nn.Module, waveform: np.ndarray, device=None) -> dict:
 
     model.eval()
     x = torch.from_numpy(waveform.astype(np.float32)).unsqueeze(0).to(device)
-    prob_p, prob_s = model(x)
+    # Use predict() to get probabilities (forward() now returns logits)
+    if hasattr(model, "predict"):
+        prob_p, prob_s = model.predict(x)
+    else:
+        logit_p, logit_s = model(x)
+        prob_p = torch.sigmoid(logit_p)
+        prob_s = torch.sigmoid(logit_s)
     prob_p = prob_p[0].cpu().numpy()
     prob_s = prob_s[0].cpu().numpy()
 
