@@ -185,10 +185,14 @@ class SeismicPicker(nn.Module):
         # so the sigmoid is only applied once at inference / in the loss.
         logit_p = F.interpolate(
             logit_p.unsqueeze(1), size=L, mode="linear", align_corners=False
-        ).squeeze(1)  # (B, 6000)
+        ).squeeze(
+            1
+        )  # (B, 6000)
         logit_s = F.interpolate(
             logit_s.unsqueeze(1), size=L, mode="linear", align_corners=False
-        ).squeeze(1)  # (B, 6000)
+        ).squeeze(
+            1
+        )  # (B, 6000)
 
         return logit_p, logit_s  # raw logits — each (B, 6000)
 

@@ -150,12 +150,25 @@ torch.cuda.manual_seed(SEED)
 # Known SeisBench pretrained weight keys per model class.
 # Any string that is NOT an existing path is treated as a pretrained name.
 _SB_PRETRAINED = {
-    "phasenet":      ["stead", "instance", "geofon", "scedc", "ethz", "neic", "original"],
-    "eqtransformer": ["stead", "instance", "geofon", "scedc", "ethz", "neic", "original"],
+    "phasenet": ["stead", "instance", "geofon", "scedc", "ethz", "neic", "original"],
+    "eqtransformer": [
+        "stead",
+        "instance",
+        "geofon",
+        "scedc",
+        "ethz",
+        "neic",
+        "original",
+    ],
 }
 
 
-def build_model(model_name: str, checkpoint: str = None, lstm_hidden: int = 128, dropout: float = 0.2) -> tuple[torch.nn.Module, str]:
+def build_model(
+    model_name: str,
+    checkpoint: str = None,
+    lstm_hidden: int = 128,
+    dropout: float = 0.2,
+) -> tuple[torch.nn.Module, str]:
     """
     Return (model, pipeline_model_type) where pipeline_model_type controls
     which window length and augmentations the pipeline uses.
@@ -166,14 +179,10 @@ def build_model(model_name: str, checkpoint: str = None, lstm_hidden: int = 128,
       3. existing .pth     → from_pretrained(default) then load_state_dict(.pth)
       4. plain string      → from_pretrained(checkpoint)  ← NEW: e.g. "instance"
     """
-    is_local_dir  = checkpoint is not None and os.path.isdir(checkpoint)
+    is_local_dir = checkpoint is not None and os.path.isdir(checkpoint)
     is_local_file = checkpoint is not None and os.path.isfile(checkpoint)
     # A plain name like "instance" or "stead" that is NOT an existing path
-    is_sb_name    = (
-        checkpoint is not None
-        and not is_local_dir
-        and not is_local_file
-    )
+    is_sb_name = checkpoint is not None and not is_local_dir and not is_local_file
 
     if model_name == "base_lstm":
         model = SeismicPicker(
@@ -223,7 +232,9 @@ def build_model(model_name: str, checkpoint: str = None, lstm_hidden: int = 128,
         else:
             model = sbm.EQTransformer.from_pretrained("instance")
             if is_local_file:
-                print(f"Loading EQTransformer weights from {checkpoint} for fine-tuning…")
+                print(
+                    f"Loading EQTransformer weights from {checkpoint} for fine-tuning…"
+                )
                 model.load_state_dict(
                     torch.load(checkpoint, map_location="cpu", weights_only=True)
                 )
@@ -283,11 +294,17 @@ def build_loaders(
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def main(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
-    
-    model, pipeline_type = build_model(config["model"], checkpoint=config["checkpoint"], lstm_hidden=config.get("lstm_hidden", 128), dropout=config.get("dropout", 0.2))
+
+    model, pipeline_type = build_model(
+        config["model"],
+        checkpoint=config["checkpoint"],
+        lstm_hidden=config.get("lstm_hidden", 128),
+        dropout=config.get("dropout", 0.2),
+    )
     train_loader, val_loader, test_loader = build_loaders(
         dataset=config["dataset"],
         pipeline_type=pipeline_type,
@@ -313,7 +330,9 @@ def main(config):
         model_name=config["model_name"],
         use_amp=(config["model"] != "eqtransformer"),
     )
-    print(f"\nRunning seismic pick evaluation on {config['dataset'].upper()} test split…")
+    print(
+        f"\nRunning seismic pick evaluation on {config['dataset'].upper()} test split…"
+    )
 
     results = run_evaluation(
         model=model,
@@ -323,6 +342,8 @@ def main(config):
         tolerance=0.1,  # ±0.1 s = ±10 samples at 100 Hz
         device=device,
     )
+
+
 if __name__ == "__main__":
 
     for config in configs:

@@ -38,7 +38,6 @@ def _extract_p_s_predictions(preds):
     return p_map, s_map
 
 
-
 def run_evaluation(
     model,
     test_loader,

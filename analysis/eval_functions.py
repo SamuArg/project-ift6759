@@ -6,9 +6,9 @@ def evaluate_seismic_detection(predictions, ground_truth, tolerance=0.1):
     Evaluate seismic wave detection for P-waves and S-waves.
 
     - True Positive (TP): Model pick is within ±tolerance of the true arrival.
-    - False Positive (FP): Model fired, but either no true arrival exists (noise) 
+    - False Positive (FP): Model fired, but either no true arrival exists (noise)
                            OR the pick is outside the tolerance window.
-    - False Negative (FN): True arrival exists, but model either didn't fire 
+    - False Negative (FN): True arrival exists, but model either didn't fire
                            OR fired outside the tolerance window.
 
     Args:
@@ -44,7 +44,7 @@ def evaluate_seismic_detection(predictions, ground_truth, tolerance=0.1):
 
         # Pick-level detection logic
         within_tol = model_fired & has_arrival & (np.abs(pred - true) <= tolerance)
-        
+
         # Calculate TP, FP, FN manually
         tp = within_tol.sum()
         fp = model_fired.sum() - tp
@@ -53,9 +53,13 @@ def evaluate_seismic_detection(predictions, ground_truth, tolerance=0.1):
         # Calculate metrics
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+        f1 = (
+            2 * precision * recall / (precision + recall)
+            if (precision + recall) > 0
+            else 0.0
+        )
 
-        # For tracking pure noise FPs 
+        # For tracking pure noise FPs
         noise_fp = model_fired & ~has_arrival
 
         # Store primary metrics
@@ -63,7 +67,7 @@ def evaluate_seismic_detection(predictions, ground_truth, tolerance=0.1):
         results[f"f1_{phase}_wave"] = f1
         results[f"precision_{phase}_wave"] = precision
         results[f"recall_{phase}_wave"] = recall
-        
+
         # Store breakdown stats for printing
         results[f"n_earthquake_{phase}"] = int(has_arrival.sum())
         results[f"n_noise_{phase}"] = int((~has_arrival).sum())
@@ -82,17 +86,29 @@ def _print_results(results, p_true, s_true, tolerance):
     print("=" * 65)
     print(f"  Tolerance window    : ±{tolerance}s")
     print(f"  Total traces        : {n_total}")
-    print(f"  Earthquake (P / S)  : {results['n_earthquake_p']} / {results['n_earthquake_s']}")
+    print(
+        f"  Earthquake (P / S)  : {results['n_earthquake_p']} / {results['n_earthquake_s']}"
+    )
     print(f"  Noise (P / S)       : {results['n_noise_p']} / {results['n_noise_s']}")
     print("-" * 65)
-    print(f"  False Positives (P/S): {results['total_fp_p']} / {results['total_fp_s']} "
-          f"(Noise only: {results['n_noise_fp_p']} / {results['n_noise_fp_s']})")
+    print(
+        f"  False Positives (P/S): {results['total_fp_p']} / {results['total_fp_s']} "
+        f"(Noise only: {results['n_noise_fp_p']} / {results['n_noise_fp_s']})"
+    )
     print(f"  False Negatives (P/S): {results['total_fn_p']} / {results['total_fn_s']}")
     print("-" * 65)
     print(f"  {'Metric':<30} {'P-wave':>10} {'S-wave':>10}")
     print("-" * 65)
-    print(f"  {'MAE':<30} {results['mae_p_wave']:>10.4f} {results['mae_s_wave']:>10.4f}")
-    print(f"  {'Precision':<30} {results['precision_p_wave']:>10.4f} {results['precision_s_wave']:>10.4f}")
-    print(f"  {'Recall':<30} {results['recall_p_wave']:>10.4f} {results['recall_s_wave']:>10.4f}")
-    print(f"  {'F1-Score':<30} {results['f1_p_wave']:>10.4f} {results['f1_s_wave']:>10.4f}")
+    print(
+        f"  {'MAE':<30} {results['mae_p_wave']:>10.4f} {results['mae_s_wave']:>10.4f}"
+    )
+    print(
+        f"  {'Precision':<30} {results['precision_p_wave']:>10.4f} {results['precision_s_wave']:>10.4f}"
+    )
+    print(
+        f"  {'Recall':<30} {results['recall_p_wave']:>10.4f} {results['recall_s_wave']:>10.4f}"
+    )
+    print(
+        f"  {'F1-Score':<30} {results['f1_p_wave']:>10.4f} {results['f1_s_wave']:>10.4f}"
+    )
     print("=" * 65)
