@@ -15,34 +15,120 @@ from analysis.run_evaluation import run_evaluation
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG  ← edit to match what you want to evaluate
 # ─────────────────────────────────────────────────────────────────────────────
-MODEL_NAME = "eqtransformer"  # "base_lstm" | "phasenet" | "eqtransformer"
-DATASET = "instance"  # dataset to evaluate on
-MODEL_DATASET = "instance"
-
-# CHECKPOINT: path to a locally trained .pth file, or None to use the
-# pretrained SeisBench weights already loaded by build_model().
-# Examples:
-#   CHECKPOINT = None                                    # pretrained SeisBench
-#   CHECKPOINT = "training/test_outputs/models/best_SeismicPicker.pth"
-# CHECKPOINT = "training/test_outputs/models/best_SeismicPicker.pth"
-#CHECKPOINT = "test_outputs/models/best_base_lstm_instance_25_1.0_v2.pth"
-CHECKPOINT = None
-
-CONFIDENCE_THR = 0.5  # pick confidence threshold
-TOLERANCE_S = 0.1  # tolerance for TP counting (seconds)
-SAMPLING_RATE = 100  # Hz
-
-N_PLOT = 8  # number of example traces to plot
-PLOT_OUT = "test_outputs/figures/sample_predictions.png"
-N_MISSED = 6  # missed-detection examples per phase
-MISSED_PLOT_OUT = "test_outputs/figures/missed_detections.png"
+configs = [
+    {
+        "model_name": "phasenet",
+        "dataset": "stead",
+        "model_dataset": "stead",
+        "checkpoint": None,  # set to None to use pretrained SeisBench weights
+        "CONFIDENCE_THR": 0.5,
+        "TOLERANCE_S": 0.1,
+        "SAMPLING_RATE": 100,
+        "N_PLOT": 8,
+        "PLOT_OUT": "test_outputs/figures/sample_predictions_phasenet.png",
+        "N_MISSED": 6,
+        "MISSED_PLOT_OUT": "test_outputs/figures/missed_detections_phasenet.png",
+        "hidden": None,
+        "dropout": None,
+    },
+    {
+        "model_name": "base_lstm",
+        "dataset": "instance",
+        "model_dataset": "instance",
+        "checkpoint": "test_outputs/models/best_base_lstm_instance_10_epochs_full_h32_d0.2.pth",  # "training/test_outputs/models/best_base_lstm_instance_
+        "CONFIDENCE_THR": 0.3,
+        "TOLERANCE_S": 0.1,
+        "SAMPLING_RATE": 100,
+        "N_PLOT": 8,
+        "PLOT_OUT": "test_outputs/figures/sample_predictions.png",
+        "N_MISSED": 6,
+        "MISSED_PLOT_OUT": "test_outputs/figures/missed_detections.png",
+        "hidden": 32,
+        "dropout": 0.2,
+    },
+    {
+        "model_name": "base_lstm",
+        "dataset": "instance",
+        "model_dataset": "instance",
+        "checkpoint": "test_outputs/models/best_base_lstm_instance_10_epochs_full_h32_d0.pth",  # "training/test_outputs/models/best_base_lstm_instance_
+        "CONFIDENCE_THR": 0.3,
+        "TOLERANCE_S": 0.1,
+        "SAMPLING_RATE": 100,
+        "N_PLOT": 8,
+        "PLOT_OUT": "test_outputs/figures/sample_predictions.png",
+        "N_MISSED": 6,
+        "MISSED_PLOT_OUT": "test_outputs/figures/missed_detections.png",
+        "hidden": 32,
+        "dropout": 0.0,
+    },
+    {
+        "model_name": "base_lstm",
+        "dataset": "instance",
+        "model_dataset": "instance",
+        "checkpoint": "test_outputs/models/best_base_lstm_instance_10_epochs_full_h64_d0.2.pth",  # "training/test_outputs/models/best_base_lstm_instance_
+        "CONFIDENCE_THR": 0.3,
+        "TOLERANCE_S": 0.1,
+        "SAMPLING_RATE": 100,
+        "N_PLOT": 8,
+        "PLOT_OUT": "test_outputs/figures/sample_predictions.png",
+        "N_MISSED": 6,
+        "MISSED_PLOT_OUT": "test_outputs/figures/missed_detections.png",
+        "hidden": 64,
+        "dropout": 0.2,
+    },
+    {
+        "model_name": "base_lstm",
+        "dataset": "instance",
+        "model_dataset": "instance",
+        "checkpoint": "test_outputs/models/best_base_lstm_instance_10_epochs_full_h64_d0.pth",  # "training/test_outputs/models/best_base_lstm_instance_
+        "CONFIDENCE_THR": 0.3,
+        "TOLERANCE_S": 0.1,
+        "SAMPLING_RATE": 100,
+        "N_PLOT": 8,
+        "PLOT_OUT": "test_outputs/figures/sample_predictions.png",
+        "N_MISSED": 6,
+        "MISSED_PLOT_OUT": "test_outputs/figures/missed_detections.png",
+        "hidden": 64,
+        "dropout": 0.0,
+    },
+    {
+        "model_name": "base_lstm",
+        "dataset": "instance",
+        "model_dataset": "instance",
+        "checkpoint": "test_outputs/models/best_base_lstm_instance_10_epochs_full_h128_d0.2.pth",  # "training/test_outputs/models/best_base_lstm_instance_
+        "CONFIDENCE_THR": 0.3,
+        "TOLERANCE_S": 0.1,
+        "SAMPLING_RATE": 100,
+        "N_PLOT": 8,
+        "PLOT_OUT": "test_outputs/figures/sample_predictions.png",
+        "N_MISSED": 6,
+        "MISSED_PLOT_OUT": "test_outputs/figures/missed_detections.png",
+        "hidden": 128,
+        "dropout": 0.2,
+    },
+    {
+        "model_name": "base_lstm",
+        "dataset": "instance",
+        "model_dataset": "instance",
+        "checkpoint": "test_outputs/models/best_base_lstm_instance_10_epochs_full_h128_d0.pth",  # "training/test_outputs/models/best_base_lstm_instance_
+        "CONFIDENCE_THR": 0.3,
+        "TOLERANCE_S": 0.1,
+        "SAMPLING_RATE": 100,
+        "N_PLOT": 8,
+        "PLOT_OUT": "test_outputs/figures/sample_predictions.png",
+        "N_MISSED": 6,
+        "MISSED_PLOT_OUT": "test_outputs/figures/missed_detections.png",
+        "hidden": 128,
+        "dropout": 0.0,
+    },
+]
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 # ── Model builders ────────────────────────────────────────────────────────────
 
 
-def build_model(model_name: str, checkpoint: str = None):
+def build_model(model_name: str, checkpoint: str = None, model_dataset: str = None, lstm_hidden: int = 128, dropout: float = 0.2):
     """Reconstruct the model architecture (must match what was trained)."""
     is_sb_dir = checkpoint is not None and os.path.isdir(checkpoint)
 
@@ -51,9 +137,9 @@ def build_model(model_name: str, checkpoint: str = None):
             SeismicPicker(
                 in_channels=3,
                 base_channels=64,
-                lstm_hidden=128,
+                lstm_hidden=lstm_hidden,
                 lstm_layers=2,
-                dropout=0.2,
+                dropout=dropout,
             ),
             "eqtransformer",  # 6000-sample window — must match train.py build_model()
         )
@@ -63,7 +149,7 @@ def build_model(model_name: str, checkpoint: str = None):
             model = sbm.PhaseNet.load(checkpoint)
             print(f"Loaded SeisBench native PhaseNet from {checkpoint}")
         else:
-            model = sbm.PhaseNet.from_pretrained(MODEL_DATASET)
+            model = sbm.PhaseNet.from_pretrained(model_dataset)
         return model, "phasenet"
 
     elif model_name == "eqtransformer":
@@ -71,7 +157,7 @@ def build_model(model_name: str, checkpoint: str = None):
             model = sbm.EQTransformer.load(checkpoint)
             print(f"Loaded SeisBench native EQTransformer from {checkpoint}")
         else:
-            model = sbm.EQTransformer.from_pretrained(MODEL_DATASET)
+            model = sbm.EQTransformer.from_pretrained(model_dataset)
         return model, "eqtransformer"
 
     raise ValueError(f"Unknown model: {model_name!r}")
@@ -462,66 +548,75 @@ def plot_missed_detections(
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
+def main(configs):
+    for config in configs:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print("\n" + "=" * 80)
+        print(f"Evaluating model: {config['model_name']}  dataset: {config['dataset']}  checkpoint: {config['checkpoint']}")
+        print("=" * 80 + "\n")
+        model_name = config["model_name"]
+        dataset = config["dataset"]
+        model_dataset = config["model_dataset"]
+        checkpoint = config["checkpoint"]
+        CONFIDENCE_THR = config["CONFIDENCE_THR"]
+        TOLERANCE_S = config["TOLERANCE_S"]
+        SAMPLING_RATE = config["SAMPLING_RATE"]
+        N_PLOT = config["N_PLOT"]
+        PLOT_OUT = config["PLOT_OUT"]
+        N_MISSED = config["N_MISSED"]
+        MISSED_PLOT_OUT = config["MISSED_PLOT_OUT"]
+        lstm_hidden = config["hidden"]
+        dropout = config["dropout"]
+
+        model, pipeline_type = build_model(model_name, checkpoint=checkpoint, model_dataset=model_dataset, lstm_hidden=lstm_hidden, dropout=dropout)
+        model = load_checkpoint(model, checkpoint)
+        model = model.to(device).eval()
+        print(f"Number of model parameters: {sum(p.numel() for p in model.parameters()):,}")
+
+        print(f"\nLoading {dataset.upper()} test split…")
+        test_pipe = SeisBenchPipelineWrapper(
+            dataset_name=dataset, dataset_fraction=1.0,
+            split="test",
+            model_type=pipeline_type,
+            transformation_shape="gaussian",
+            transformation_sigma=10,
+            max_distance=100,
+        )
+        test_loader = test_pipe.get_dataloader(batch_size=128, num_workers=8, shuffle=False)
+
+        print(f"\nRunning seismic pick evaluation…")
+        run_evaluation(
+            model=model,
+            test_loader=test_loader,
+            confidence_threshold=CONFIDENCE_THR,
+            noise_threshold=0.1,
+            tolerance=TOLERANCE_S,
+            device=device,
+        )
+
+        plot_loader = test_pipe.get_dataloader(batch_size=128, num_workers=8, shuffle=True)
+        print(f"\nPlotting {N_PLOT} earthquake sample predictions…")
+        plot_predictions(
+            model=model,
+            plot_loader=plot_loader,
+            device=device,
+            n=N_PLOT,
+            confidence_thr=CONFIDENCE_THR,
+            sampling_rate=SAMPLING_RATE,
+            out_path=PLOT_OUT,
+        )
+        print(f"\nSearching for missed detections (recall failures)…")
+        plot_missed_detections(
+            model=model,
+            plot_loader=plot_loader,
+            device=device,
+            n=N_MISSED,
+            confidence_thr=CONFIDENCE_THR,
+            noise_threshold=0.1,
+            sampling_rate=SAMPLING_RATE,
+            out_path=MISSED_PLOT_OUT,
+        )
+
+
 if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
-
-    # ── Model ─────────────────────────────────────────────────────────────
-    model, pipeline_type = build_model(MODEL_NAME, checkpoint=CHECKPOINT)
-    model = load_checkpoint(model, CHECKPOINT)
-    model = model.to(device).eval()
-
-    print(f"Number of model parameters: {sum(p.numel() for p in model.parameters()):,}")
-
-    # ── Test dataloader ───────────────────────────────────────────────────
-    print(f"\nLoading {DATASET.upper()} test split…")
-    test_pipe = SeisBenchPipelineWrapper(
-        dataset_name=DATASET, dataset_fraction=1.0,
-        split="test",
-        model_type=pipeline_type,
-        transformation_shape="gaussian",
-        transformation_sigma=10,
-        max_distance=100,
-    )
-    test_loader = test_pipe.get_dataloader(batch_size=128, num_workers=8, shuffle=False)
-
-    # ── Evaluation ────────────────────────────────────────────────────────
-    print(f"\nRunning seismic pick evaluation…")
-    run_evaluation(
-        model=model,
-        test_loader=test_loader,
-        confidence_threshold=CONFIDENCE_THR,
-        noise_threshold=0.1,
-        tolerance=TOLERANCE_S,
-        device=device,
-    )
-
-    # ── Shuffled loader — gives representative, varied earthquake samples ──
-    # shuffle=True ensures we don't always pick the same leading traces
-    # (many of which may be noise or have arrivals clustered at one position).
-    plot_loader = test_pipe.get_dataloader(batch_size=128, num_workers=8, shuffle=True)
-
-    # ── Plot ──────────────────────────────────────────────────────────────
-    print(f"\nPlotting {N_PLOT} earthquake sample predictions…")
-    plot_predictions(
-        model=model,
-        plot_loader=plot_loader,
-        device=device,
-        n=N_PLOT,
-        confidence_thr=CONFIDENCE_THR,
-        sampling_rate=SAMPLING_RATE,
-        out_path=PLOT_OUT,
-    )
-
-    # ── Missed-detection plot ─────────────────────────────────────────────
-    print(f"\nSearching for missed detections (recall failures)…")
-    plot_missed_detections(
-        model=model,
-        plot_loader=plot_loader,
-        device=device,
-        n=N_MISSED,
-        confidence_thr=CONFIDENCE_THR,
-        noise_threshold=0.1,
-        sampling_rate=SAMPLING_RATE,
-        out_path=MISSED_PLOT_OUT,
-    )
+    main(configs)
