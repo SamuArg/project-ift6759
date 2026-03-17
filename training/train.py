@@ -40,13 +40,15 @@ import numpy as np
 #   "path/to/weights.pth" → any model: load_state_dict from local .pth file
 #   "path/to/sb_dir/"     → phasenet/eqtransformer: SeisBench .load() from local dir
 
-"""    {
+
+configs = [
+        {
         "model": "base_lstm",
         "dataset": "instance",
         "checkpoint": None,
         "fraction": 1.0,
         "n_epochs": 10,
-        "model_name": "base_lstm_instance_10_epochs_full_h128_d0.2",
+        "model_name": "base_lstm_instance_10_epochs_full_h128_d0.2_v2",
         "batch_size": 128,
         "learning_rate": 1e-3,
         "sigma": 10,
@@ -61,7 +63,7 @@ import numpy as np
         "checkpoint": None,
         "fraction": 1.0,
         "n_epochs": 10,
-        "model_name": "base_lstm_instance_10_epochs_full_h64_d0",
+        "model_name": "base_lstm_instance_10_epochs_full_h64_d0_v2",
         "batch_size": 128,
         "learning_rate": 1e-3,
         "sigma": 10,
@@ -69,17 +71,14 @@ import numpy as np
         "max_distance": 100,
         "lstm_hidden": 64,
         "dropout": 0,
-    },"""
-
-
-configs = [
+    },
     {
         "model": "base_lstm",
         "dataset": "instance",
         "checkpoint": None,
         "fraction": 1.0,
         "n_epochs": 10,
-        "model_name": "base_lstm_instance_10_epochs_full_h32_d0",
+        "model_name": "base_lstm_instance_10_epochs_full_h32_d0_v2",
         "batch_size": 128,
         "learning_rate": 1e-3,
         "sigma": 10,
@@ -94,7 +93,7 @@ configs = [
         "checkpoint": None,
         "fraction": 1.0,
         "n_epochs": 10,
-        "model_name": "base_lstm_instance_10_epochs_full_h32_d0.2",
+        "model_name": "base_lstm_instance_10_epochs_full_h32_d0.2_v2",
         "batch_size": 128,
         "learning_rate": 1e-3,
         "sigma": 10,
@@ -109,7 +108,7 @@ configs = [
         "checkpoint": None,
         "fraction": 1.0,
         "n_epochs": 10,
-        "model_name": "base_lstm_instance_10_epochs_full_h64_d0.2",
+        "model_name": "base_lstm_instance_10_epochs_full_h64_d0.2_v2",
         "batch_size": 128,
         "learning_rate": 1e-3,
         "sigma": 10,
@@ -124,7 +123,7 @@ configs = [
         "checkpoint": None,
         "fraction": 1.0,
         "n_epochs": 10,
-        "model_name": "base_lstm_instance_10_epochs_full_h128_d0",
+        "model_name": "base_lstm_instance_10_epochs_full_h128_d0_v2",
         "batch_size": 128,
         "learning_rate": 1e-3,
         "sigma": 10,

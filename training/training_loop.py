@@ -140,7 +140,7 @@ def default_phase_loss(
         )
 
     prob_p, prob_s = _unpack_predictions(outputs)
-    loss = _bce(prob_p, targets_p) + _bce(prob_s, targets_s)
+    loss = _bce(prob_p, targets_p) + 2 * _bce(prob_s, targets_s)
 
     # Detection head — only active for EQTransformer
     if targets_det is not None:
