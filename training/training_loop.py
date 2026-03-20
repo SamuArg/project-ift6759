@@ -267,9 +267,10 @@ def run_epoch(
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                scale_before = scaler.get_scale()
                 scaler.step(optimizer)
                 scaler.update()
-                if scheduler is not None:
+                if scheduler is not None and scaler.get_scale() == scale_before:
                     scheduler.step()
 
             with torch.no_grad():

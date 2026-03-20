@@ -1,7 +1,7 @@
 import numpy as np
 import seisbench.data as sbd
 import seisbench.generate as sbg
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 
 class SeisBenchPipelineWrapper:
@@ -15,6 +15,7 @@ class SeisBenchPipelineWrapper:
         transformation_shape="gaussian",
         transformation_sigma=10,
         dataset_fraction=1.0,
+        oversample_magnitudes=False,
     ):
         """
         A unified wrapper to generate training pipelines for various seismic models using SeisBench.
@@ -36,6 +37,7 @@ class SeisBenchPipelineWrapper:
         self.transformation_shape = transformation_shape
         self.transformation_sigma = transformation_sigma
         self.dataset_fraction = dataset_fraction
+        self.oversample_magnitudes = oversample_magnitudes
 
         print(f"Loading {self.dataset_name} ({self.split} split)...")
         if self.dataset_name == "STEAD":
@@ -48,6 +50,8 @@ class SeisBenchPipelineWrapper:
             dataset = sbd.GEOFON(component_order=self.component_order)
         elif self.dataset_name == "TXED":
             dataset = sbd.TXED(component_order=self.component_order)
+        elif self.dataset_name == "DUMMY":
+            dataset = sbd.DummyDataset(component_order=self.component_order)
         else:
             raise ValueError(f"Dataset {self.dataset_name} not supported.")
 
@@ -134,6 +138,76 @@ class SeisBenchPipelineWrapper:
             self.generator = self._build_steered_generator()
 
         self._attach_pipeline()
+
+        if self.split == "train" and self.oversample_magnitudes:
+            balanced_indices = self._balance_magnitudes()
+            if balanced_indices is not None:
+                self.generator = Subset(self.generator, balanced_indices)
+
+    def _balance_magnitudes(self):
+        """
+        Computes indices to oversample minority magnitude bins so all bins match
+        the size of the largest bin. Noise traces (NaN magnitude) form their own bin.
+        Returns a 1D numpy array of indices to pass to a torch Subset.
+        """
+        import pandas as pd
+        meta = self.dataset.metadata
+        n_original = len(meta)
+
+        # 1. Identify magnitude column
+        mag_cols = ["source_magnitude", "event_magnitude", "source_mag"]
+        mag_col = next((c for c in mag_cols if c in meta.columns), None)
+        
+        if mag_col is None:
+            print("Warning: oversample_magnitudes=True but no magnitude column found. Skipping.")
+            return None
+
+        print(f"Oversampling magnitudes (column: '{mag_col}')...")
+        mags = meta[mag_col].values
+        
+        # 2. Assign each trace to a bin ID
+        # Bins: 0=Noise, 1=[0,1), 2=[1,2), 3=[2,3), 4=[3,4), 5=[4,5), 6=[5,6), 7=[6,∞)
+        bin_edges = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        bin_ids = np.zeros(n_original, dtype=int)  # 0 is noise (where mag is NaN)
+        
+        valid_mask = ~pd.isna(mags)
+        # Use np.digitize for the valid magnitudes.
+        # Digitize returns indices 1..len(bins) based on where the value falls.
+        # We shift by 1 so bin 1 is [0,1), bin 2 is [1,2), etc.
+        bin_ids[valid_mask] = np.digitize(mags[valid_mask], bin_edges)
+
+        # 3. Find the majority class size
+        unique_bins, counts = np.unique(bin_ids, return_counts=True)
+        max_count = counts.max()
+        print(f"  Majority bin size: {max_count} traces")
+
+        # 4. Oversample minority bins
+        balanced_indices = []
+        original_indices = np.arange(n_original)
+        
+        for b_id, b_count in zip(unique_bins, counts):
+            idx_in_bin = original_indices[bin_ids == b_id]
+            if b_count == max_count:
+                balanced_indices.append(idx_in_bin)
+            else:
+                # Sample with replacement to match max_count
+                sampled_idx = np.random.choice(idx_in_bin, size=max_count, replace=True)
+                balanced_indices.append(sampled_idx)
+                if b_id == 0:
+                    label = "Noise"
+                elif b_id == len(bin_edges):
+                    label = f"M>={bin_edges[-1]}"
+                else:
+                    label = f"M[{bin_edges[b_id-1]},{bin_edges[b_id]})"
+                print(f"  Oversampled '{label}': {b_count} → {max_count}")
+
+        # Flatten and shuffle
+        balanced_indices = np.concatenate(balanced_indices)
+        np.random.shuffle(balanced_indices)
+
+        # 5. Return the shuffled oversampled indices
+        print(f"Oversampling complete: index array grew from {n_original} to {len(balanced_indices)} traces.")
+        return balanced_indices
 
     def _build_steered_generator(self):
         """Builds a SteeredGenerator for eval splits with control metadata."""

@@ -134,6 +134,25 @@ configs = [
     },
 ]
 
+configs = [{
+    "model": "base_lstm",
+    "dataset": "instance",
+    "checkpoint": None,
+    "fraction": 0.1,
+    "n_epochs": 2,
+    "model_name": "base_lstm_instance_2_epochs_0.1_h128_c128_l2_d0.2",
+    "batch_size": 32,
+    "learning_rate": 1e-3,
+    "sigma": 10,
+    "type_label": "gaussian",
+    "max_distance": 100,
+    "lstm_hidden": 128,
+    "dropout": 0.2,
+    "base_channels": 128,
+    "lstm_layers": 2,
+    "oversample": True,
+}]
+
 LOGDIR = "test_outputs/logs"
 FIGDIR = "test_outputs/figures"
 MODELDIR = "test_outputs/models"
@@ -167,6 +186,8 @@ def build_model(
     checkpoint: str = None,
     lstm_hidden: int = 128,
     dropout: float = 0.2,
+    base_channels: int = 64,
+    lstm_layers: int = 2,
 ) -> tuple[torch.nn.Module, str]:
     """
     Return (model, pipeline_model_type) where pipeline_model_type controls
@@ -186,9 +207,9 @@ def build_model(
     if model_name == "base_lstm":
         model = SeismicPicker(
             in_channels=3,
-            base_channels=64,
+            base_channels=base_channels,
             lstm_hidden=lstm_hidden,
-            lstm_layers=2,
+            lstm_layers=lstm_layers,
             dropout=dropout,
         )
         pipeline_type = "eqtransformer"  # 6000-sample window for this model
@@ -258,6 +279,7 @@ def build_loaders(
     sigma: int,
     type_label: str,
     max_distance: int,
+    oversample: bool,
 ):
     """Build train / val / test DataLoaders from SeisBenchPipelineWrapper."""
     common = dict(
@@ -271,7 +293,7 @@ def build_loaders(
 
     print(f"\nLoading {dataset.upper()} dataset (pipeline={pipeline_type})…")
     train_pipe = SeisBenchPipelineWrapper(
-        split="train", dataset_fraction=fraction, **common
+        split="train", dataset_fraction=fraction, oversample_magnitudes=oversample, **common
     )
     val_pipe = SeisBenchPipelineWrapper(split="dev", **common)
     test_pipe = SeisBenchPipelineWrapper(split="test", **common)
@@ -303,6 +325,8 @@ def main(config):
         checkpoint=config["checkpoint"],
         lstm_hidden=config.get("lstm_hidden", 128),
         dropout=config.get("dropout", 0.2),
+        base_channels=config.get("base_channels", 64),
+        lstm_layers=config.get("lstm_layers", 2),
     )
     train_loader, val_loader, test_loader = build_loaders(
         dataset=config["dataset"],
@@ -312,6 +336,7 @@ def main(config):
         sigma=config["sigma"],
         type_label=config["type_label"],
         max_distance=config["max_distance"],
+        oversample=config.get("oversample", False),
     )
 
     model, metrics = train(

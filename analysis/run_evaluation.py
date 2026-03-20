@@ -46,6 +46,7 @@ def run_evaluation(
     noise_threshold: float = 0.1,
     tolerance: float = 0.1,
     device=None,
+    magnitudes=None,
 ) -> dict:
     """
     Evaluate a seismic phase-picking model on a labelled test DataLoader.
@@ -59,6 +60,9 @@ def run_evaluation(
     noise_threshold      : min label peak to consider a trace as an earthquake
     tolerance            : pick tolerance in seconds for TP / F1
     device               : torch.device; defaults to GPU if available
+    magnitudes           : optional 1-D array/list of per-sample magnitudes (NaN
+                           for noise/unknown), aligned with test_loader order.
+                           Pass from SeisBenchPipelineWrapper.generator.metadata.
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -125,4 +129,6 @@ def run_evaluation(
         f"Evaluating {len(predictions)} traces ({n_eq} earthquake, {n_noise} noise)..."
     )
 
-    return evaluate_seismic_detection(predictions, ground_truth, tolerance=tolerance)
+    return evaluate_seismic_detection(
+        predictions, ground_truth, tolerance=tolerance, magnitudes=magnitudes
+    )

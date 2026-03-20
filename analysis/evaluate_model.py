@@ -121,6 +121,41 @@ configs = [
         "hidden": 128,
         "dropout": 0.0,
     },
+    {
+    "model_name": "phasenet",
+    "dataset": "instance",
+    "model_dataset": "instance",
+    "checkpoint": None,  # set to None to use pretrained SeisBench weights
+    "CONFIDENCE_THR": 0.3,
+    "TOLERANCE_S": 0.1,
+    "SAMPLING_RATE": 100,
+    "N_PLOT": 8,
+    "PLOT_OUT": "test_outputs/figures/sample_predictions_phasenet.png",
+    "N_MISSED": 6,
+    "MISSED_PLOT_OUT": "test_outputs/figures/missed_detections_phasenet.png",
+    "hidden": None,
+    "dropout": None,
+    }
+]
+
+configs = [
+    {
+        "model_name": "base_lstm",
+        "dataset": "instance",
+        "model_dataset": "instance",
+        "checkpoint": "test_outputs/models/best_base_lstm_instance_50_1.0.pth",
+        "CONFIDENCE_THR": 0.3,
+        "TOLERANCE_S": 0.1,
+        "SAMPLING_RATE": 100,
+        "N_PLOT": 8,
+        "PLOT_OUT": "test_outputs/figures/sample_predictions.png",
+        "N_MISSED": 6,
+        "MISSED_PLOT_OUT": "test_outputs/figures/missed_detections.png",
+        "hidden": 128,
+        "dropout": 0.2,
+        "base_channels": 64,
+        "lstm_layers": 2,
+    }
 ]
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -134,6 +169,8 @@ def build_model(
     model_dataset: str = None,
     lstm_hidden: int = 128,
     dropout: float = 0.2,
+    base_channels: int = 64,
+    lstm_layers: int = 2,
 ):
     """Reconstruct the model architecture (must match what was trained)."""
     is_sb_dir = checkpoint is not None and os.path.isdir(checkpoint)
@@ -142,9 +179,9 @@ def build_model(
         return (
             SeismicPicker(
                 in_channels=3,
-                base_channels=64,
+                base_channels=base_channels,
                 lstm_hidden=lstm_hidden,
-                lstm_layers=2,
+                lstm_layers=lstm_layers,
                 dropout=dropout,
             ),
             "eqtransformer",  # 6000-sample window — must match train.py build_model()
@@ -582,6 +619,107 @@ def plot_missed_detections(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Error violin plot
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def plot_error_violins(
+    results: dict,
+    model_name: str,
+    sampling_rate: int = 100,
+    out_path: str = None,
+):
+    errors_p = results.get("abs_errors_p_wave", np.array([]))
+    errors_s = results.get("abs_errors_s_wave", np.array([]))
+
+    if len(errors_p) == 0 and len(errors_s) == 0:
+        print("No errors to plot — skipping violin plot.")
+        return
+
+    # Clip zeros to a small value so log scale works
+    eps = 1e-3  # 1 ms minimum
+    errors_p_plot = np.clip(errors_p, eps, None) if len(errors_p) > 0 else np.array([])
+    errors_s_plot = np.clip(errors_s, eps, None) if len(errors_s) > 0 else np.array([])
+
+    data   = [d for d in [errors_p_plot, errors_s_plot] if len(d) > 0]
+    labels = [l for l, d in [("P-wave", errors_p_plot), ("S-wave", errors_s_plot)] if len(d) > 0]
+    colors = [c for c, d in [("#e63946", errors_p_plot), ("#457b9d", errors_s_plot)] if len(d) > 0]
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+
+    parts = ax.violinplot(
+        data,
+        positions=range(len(data)),
+        showmedians=True,
+        showextrema=True,
+        widths=0.6,
+    )
+    for body, color in zip(parts["bodies"], colors):
+        body.set_facecolor(color)
+        body.set_alpha(0.35)
+        body.set_edgecolor(color)
+        body.set_linewidth(1.2)
+
+    # Box overlay
+    bp = ax.boxplot(
+        data,
+        positions=range(len(data)),
+        widths=0.15,
+        patch_artist=True,
+        showfliers=False,
+        medianprops=dict(color="white", linewidth=2),
+        whiskerprops=dict(linewidth=1.2),
+        capprops=dict(linewidth=1.2),
+    )
+    for patch, color in zip(bp["boxes"], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.8)
+
+    # Percentile markers + annotations
+    for i, (errs, label, color) in enumerate(zip(data, labels, colors)):
+        median = np.median(errs)
+        p95    = np.percentile(errs, 95)
+        ax.scatter(i, median, color="white", zorder=5, s=40)
+        ax.axhline(p95, xmin=(i + 0.05) / len(data), xmax=(i + 0.95) / len(data),
+                   color=color, linewidth=1.2, linestyle="--", alpha=0.7)
+        ax.text(i + 0.32, median,  f"med={median:.3f}s",  va="center", fontsize=8, color="white",
+                fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.2", facecolor=color, alpha=0.7, edgecolor="none"))
+        ax.text(i + 0.32, p95,     f"p95={p95:.3f}s",     va="bottom", fontsize=7.5, color=color)
+
+    ax.set_yscale("log")
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, fontsize=12)
+    ax.set_ylabel("Absolute pick error (s)", fontsize=10)
+    ax.set_title(f"{model_name} — Pick Error Distribution", fontsize=12)
+
+    # Reference lines (text moved inside right edge to avoid x-axis labels)
+    for ref_s, ref_label in [(0.1, "±0.1 s tol"), (0.5, "0.5 s"), (1.0, "1 s")]:
+        ax.axhline(ref_s, color="gray", linewidth=0.8, linestyle=":", alpha=0.6)
+        ax.text(len(data) - 0.55, ref_s, ref_label, va="bottom", ha="left",
+                fontsize=8, color="gray")
+
+    # Summary stats table below
+    for i, (errs, label) in enumerate(zip(data, labels)):
+        pct_within_tol = 100 * (errs <= 0.1).sum() / len(errs)
+        pct_over_1s    = 100 * (errs >  1.0).sum() / len(errs)
+        ax.text(i, ax.get_ylim()[0] * 0.6,
+                f"n={len(errs):,}\n≤0.1s: {pct_within_tol:.1f}%\n>1s: {pct_over_1s:.1f}%",
+                ha="center", va="top", fontsize=7.5, color="#333333",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="#f0f0f0", alpha=0.8, edgecolor="none"))
+
+    plt.tight_layout()
+    if out_path is not None:
+        os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+        plt.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Error violin plot saved to {out_path}")
+    else:
+        plt.show()
+        plt.close(fig)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -607,6 +745,8 @@ def main(configs):
         MISSED_PLOT_OUT = config["MISSED_PLOT_OUT"]
         lstm_hidden = config["hidden"]
         dropout = config["dropout"]
+        base_channels = config.get("base_channels", 64)
+        lstm_layers = config.get("lstm_layers", 2)
 
         model, pipeline_type = build_model(
             model_name,
@@ -614,6 +754,8 @@ def main(configs):
             model_dataset=model_dataset,
             lstm_hidden=lstm_hidden,
             dropout=dropout,
+            base_channels=base_channels,
+            lstm_layers=lstm_layers,
         )
         model = load_checkpoint(model, checkpoint)
         model = model.to(device).eval()
@@ -635,14 +777,33 @@ def main(configs):
             batch_size=128, num_workers=8, shuffle=False
         )
 
+        # Extract per-trace magnitudes from dataset metadata (aligned with shuffle=False loader)
+        mag_col = "source_magnitude"
+        gen_meta = getattr(test_pipe.generator, "metadata", None)
+        if gen_meta is not None and mag_col in gen_meta.columns:
+            eval_magnitudes = gen_meta[mag_col].to_numpy(dtype=float)
+            print(f"  Magnitude column found: {(~np.isnan(eval_magnitudes)).sum()} non-NaN values")
+        else:
+            eval_magnitudes = None
+            print("  Warning: 'source_magnitude' not found in dataset metadata — skipping magnitude breakdown.")
+
         print(f"\nRunning seismic pick evaluation…")
-        run_evaluation(
+        results = run_evaluation(
             model=model,
             test_loader=test_loader,
             confidence_threshold=CONFIDENCE_THR,
             noise_threshold=0.1,
             tolerance=TOLERANCE_S,
             device=device,
+            magnitudes=eval_magnitudes,
+        )
+
+        violin_out = PLOT_OUT.replace(".png", f"_error_violin.png")
+        plot_error_violins(
+            results=results,
+            model_name=config["model_name"],
+            sampling_rate=SAMPLING_RATE,
+            out_path=violin_out,
         )
 
         plot_loader = test_pipe.get_dataloader(
