@@ -134,24 +134,24 @@ configs = [
     },
 ]
 
-configs = [{
-    "model": "base_lstm",
-    "dataset": "instance",
-    "checkpoint": None,
-    "fraction": 0.1,
-    "n_epochs": 2,
-    "model_name": "base_lstm_instance_2_epochs_0.1_h128_c128_l2_d0.2",
-    "batch_size": 32,
-    "learning_rate": 1e-3,
-    "sigma": 10,
-    "type_label": "gaussian",
-    "max_distance": 100,
-    "lstm_hidden": 128,
-    "dropout": 0.2,
-    "base_channels": 128,
-    "lstm_layers": 2,
-    "oversample": True,
-}]
+configs = [
+    {
+        "model": "bilstm",
+        "dataset": "instance",
+        "checkpoint": None,
+        "fraction": 1.0,
+        "n_epochs": 30,
+        "model_name": "bilstm_test",
+        "batch_size": 32,
+        "learning_rate": 1e-3,
+        "sigma": 10,
+        "type_label": "gaussian",
+        "max_distance": 100,
+        "lstm_hidden": 128,
+        "dropout": 0.2,
+        "lstm_layers": 2,
+    },
+]
 
 LOGDIR = "test_outputs/logs"
 FIGDIR = "test_outputs/figures"
@@ -260,10 +260,60 @@ def build_model(
                 )
         pipeline_type = "eqtransformer"
 
+    elif model_name == "unet":
+        from models.Upgrade1_skip_connections import SeismicPickerUNet
+        model = SeismicPickerUNet(
+            in_channels=3,
+            base_ch=32,
+            lstm_hidden=lstm_hidden,
+            lstm_layers=lstm_layers,
+            dropout=dropout,
+        )
+        pipeline_type = "phasenet"  # 3001 window, produces p, s 
+
+        if is_local_file:
+            print(f"Loading unet weights from {checkpoint} for fine-tuning…")
+            model.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True))
+        elif checkpoint is not None:
+            raise ValueError(f"unet only supports a local .pth checkpoint, got: {checkpoint!r}")
+
+    elif model_name == "unet_det":
+        from models.Upgrade2_detection_head import SeismicPickerUNetDet
+        model = SeismicPickerUNetDet(
+            in_channels=3,
+            base_ch=32,
+            lstm_hidden=lstm_hidden,
+            lstm_layers=lstm_layers,
+            dropout=dropout,
+        )
+        pipeline_type = "eqtransformer"  # 6000 window, produces det, p, s 
+
+        if is_local_file:
+            print(f"Loading unet_det weights from {checkpoint} for fine-tuning…")
+            model.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True))
+        elif checkpoint is not None:
+            raise ValueError(f"unet_det only supports a local .pth checkpoint, got: {checkpoint!r}")
+
+    elif model_name == "bilstm":
+        from models.bilstm import SeismicBiLSTM
+        model = SeismicBiLSTM(
+            in_channels=3,
+            lstm_hidden=lstm_hidden,
+            lstm_layers=lstm_layers,
+            dropout=dropout,
+        )
+        pipeline_type = "eqtransformer"  # 6000 window
+
+        if is_local_file:
+            print(f"Loading bilstm weights from {checkpoint} for fine-tuning…")
+            model.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True))
+        elif checkpoint is not None:
+            raise ValueError(f"bilstm only supports a local .pth checkpoint, got: {checkpoint!r}")
+
     else:
         raise ValueError(
             f"Unknown model: {model_name!r}. "
-            f"Choose 'base_lstm', 'phasenet', or 'eqtransformer'."
+            f"Choose 'base_lstm', 'bilstm', 'phasenet', 'eqtransformer', 'unet', or 'unet_det'."
         )
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
