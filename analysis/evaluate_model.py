@@ -143,7 +143,7 @@ configs = [
         "model_name": "base_lstm",
         "dataset": "instance",
         "model_dataset": "instance",
-        "checkpoint": "test_outputs/models/best_base_lstm_instance_50_1.0.pth",
+        "checkpoint": "test_outputs/models/best_base_lstm_instance_10_epochs_full_h128_c128_l2_d0.2_oversample.pth",
         "CONFIDENCE_THR": 0.3,
         "TOLERANCE_S": 0.1,
         "SAMPLING_RATE": 100,
@@ -153,7 +153,7 @@ configs = [
         "MISSED_PLOT_OUT": "test_outputs/figures/missed_detections.png",
         "hidden": 128,
         "dropout": 0.2,
-        "base_channels": 64,
+        "base_channels": 128,
         "lstm_layers": 2,
     }
 ]
@@ -202,6 +202,44 @@ def build_model(
         else:
             model = sbm.EQTransformer.from_pretrained(model_dataset)
         return model, "eqtransformer"
+
+    elif model_name == "unet":
+        from models.Upgrade1_skip_connections import SeismicPickerUNet
+        return (
+            SeismicPickerUNet(
+                in_channels=3,
+                base_ch=32,
+                lstm_hidden=lstm_hidden,
+                lstm_layers=lstm_layers,
+                dropout=dropout,
+            ),
+            "phasenet",
+        )
+
+    elif model_name == "unet_det":
+        from models.Upgrade2_detection_head import SeismicPickerUNetDet
+        return (
+            SeismicPickerUNetDet(
+                in_channels=3,
+                base_ch=32,
+                lstm_hidden=lstm_hidden,
+                lstm_layers=lstm_layers,
+                dropout=dropout,
+            ),
+            "eqtransformer",
+        )
+
+    elif model_name == "bilstm":
+        from models.bilstm import SeismicBiLSTM
+        return (
+            SeismicBiLSTM(
+                in_channels=3,
+                lstm_hidden=lstm_hidden,
+                lstm_layers=lstm_layers,
+                dropout=dropout,
+            ),
+            "eqtransformer",
+        )
 
     raise ValueError(f"Unknown model: {model_name!r}")
 

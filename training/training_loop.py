@@ -142,11 +142,16 @@ def default_phase_loss(
     prob_p, prob_s = _unpack_predictions(outputs)
     loss = _bce(prob_p, targets_p) + 2 * _bce(prob_s, targets_s)
 
-    # Detection head — only active for EQTransformer
+    # Detection head — only active for EQTransformer and U-Net-Det
     if targets_det is not None:
         pred_det = _get_detection_output(outputs)
         if pred_det is not None:
-            loss = loss + _bce(pred_det, targets_det)
+            targets_for_det = targets_det
+            # If model predicts a scalar per trace (B,), collapse the target (B, T) -> (B,)
+            if pred_det.ndim == 1 and targets_for_det.ndim == 2:
+                targets_for_det = (targets_for_det.max(dim=-1).values > 0.5).float()
+            
+            loss = loss + _bce(pred_det, targets_for_det)
 
     return loss
 
