@@ -4,6 +4,25 @@ import seisbench.generate as sbg
 from torch.utils.data import DataLoader, Subset
 
 
+class AddCoords:
+    def __init__(self, key="coords"):
+        self.key = key
+
+    def __call__(self, state_dict):
+        lat_cols = ["station_latitude_deg", "station_latitude", "receiver_latitude", "trace_station_latitude"]
+        lon_cols = ["station_longitude_deg", "station_longitude", "receiver_longitude", "trace_station_longitude"]
+        
+        lat = next((state_dict[c] for c in lat_cols if c in state_dict), float('nan'))
+        lon = next((state_dict[c] for c in lon_cols if c in state_dict), float('nan'))
+        
+        if np.isnan(lat): lat = 0.0
+        if np.isnan(lon): lon = 0.0
+        
+        # SeisBench state_dict arrays must be stored as (array, metadata_dict) tuples
+        state_dict[self.key] = (np.array([lat, lon], dtype=np.float32), None)
+        return state_dict
+
+
 class SeisBenchPipelineWrapper:
     def __init__(
         self,
@@ -16,6 +35,7 @@ class SeisBenchPipelineWrapper:
         transformation_sigma=10,
         dataset_fraction=1.0,
         oversample_magnitudes=False,
+        use_coords=False,
     ):
         """
         A unified wrapper to generate training pipelines for various seismic models using SeisBench.
@@ -38,6 +58,7 @@ class SeisBenchPipelineWrapper:
         self.transformation_sigma = transformation_sigma
         self.dataset_fraction = dataset_fraction
         self.oversample_magnitudes = oversample_magnitudes
+        self.use_coords = use_coords
 
         print(f"Loading {self.dataset_name} ({self.split} split)...")
         if self.dataset_name == "STEAD":
@@ -345,6 +366,12 @@ class SeisBenchPipelineWrapper:
                     sbg.ChangeDtype(np.float32, key="y_det"),
                 ]
             )
+
+        if self.use_coords:
+            augmentations.extend([
+                AddCoords(key="coords"),
+                sbg.ChangeDtype(np.float32, key="coords")
+            ])
 
         self.generator.add_augmentations(augmentations)
 

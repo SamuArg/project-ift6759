@@ -41,117 +41,28 @@ import numpy as np
 #   "path/to/sb_dir/"     → phasenet/eqtransformer: SeisBench .load() from local dir
 
 
-configs = [
-        {
-        "model": "base_lstm",
-        "dataset": "instance",
-        "checkpoint": None,
-        "fraction": 1.0,
-        "n_epochs": 10,
-        "model_name": "base_lstm_instance_10_epochs_full_h128_d0.2_v2",
-        "batch_size": 128,
-        "learning_rate": 1e-3,
-        "sigma": 10,
-        "type_label": "gaussian",
-        "max_distance": 100,
-        "lstm_hidden": 128,
-        "dropout": 0.2,
-    },
-    {
-        "model": "base_lstm",
-        "dataset": "instance",
-        "checkpoint": None,
-        "fraction": 1.0,
-        "n_epochs": 10,
-        "model_name": "base_lstm_instance_10_epochs_full_h64_d0_v2",
-        "batch_size": 128,
-        "learning_rate": 1e-3,
-        "sigma": 10,
-        "type_label": "gaussian",
-        "max_distance": 100,
-        "lstm_hidden": 64,
-        "dropout": 0,
-    },
-    {
-        "model": "base_lstm",
-        "dataset": "instance",
-        "checkpoint": None,
-        "fraction": 1.0,
-        "n_epochs": 10,
-        "model_name": "base_lstm_instance_10_epochs_full_h32_d0_v2",
-        "batch_size": 128,
-        "learning_rate": 1e-3,
-        "sigma": 10,
-        "type_label": "gaussian",
-        "max_distance": 100,
-        "lstm_hidden": 32,
-        "dropout": 0,
-    },
-    {
-        "model": "base_lstm",
-        "dataset": "instance",
-        "checkpoint": None,
-        "fraction": 1.0,
-        "n_epochs": 10,
-        "model_name": "base_lstm_instance_10_epochs_full_h32_d0.2_v2",
-        "batch_size": 128,
-        "learning_rate": 1e-3,
-        "sigma": 10,
-        "type_label": "gaussian",
-        "max_distance": 100,
-        "lstm_hidden": 32,
-        "dropout": 0.2,
-    },
-    {
-        "model": "base_lstm",
-        "dataset": "instance",
-        "checkpoint": None,
-        "fraction": 1.0,
-        "n_epochs": 10,
-        "model_name": "base_lstm_instance_10_epochs_full_h64_d0.2_v2",
-        "batch_size": 128,
-        "learning_rate": 1e-3,
-        "sigma": 10,
-        "type_label": "gaussian",
-        "max_distance": 100,
-        "lstm_hidden": 64,
-        "dropout": 0.2,
-    },
-    {
-        "model": "base_lstm",
-        "dataset": "instance",
-        "checkpoint": None,
-        "fraction": 1.0,
-        "n_epochs": 10,
-        "model_name": "base_lstm_instance_10_epochs_full_h128_d0_v2",
-        "batch_size": 128,
-        "learning_rate": 1e-3,
-        "sigma": 10,
-        "type_label": "gaussian",
-        "max_distance": 100,
-        "lstm_hidden": 128,
-        "dropout": 0,
-    },
-]
-
-configs = [
-    {
-        "model": "bilstm",
-        "dataset": "instance",
-        "checkpoint": None,
-        "fraction": 1.0,
-        "n_epochs": 30,
-        "model_name": "bilstm_test",
-        "batch_size": 32,
-        "learning_rate": 1e-3,
-        "sigma": 10,
-        "type_label": "gaussian",
-        "max_distance": 100,
-        "lstm_hidden": 128,
-        "dropout": 0.2,
-        "lstm_layers": 2,
-    },
-]
+configs = []
+for dataset in ["instance", "stead"]:
+    for use_coords in [False, True]:
+        for lstm_hidden in [64, 128]:
+            coords_str = "coords" if use_coords else "nocoords"
+            configs.append({
+                "model": "base_lstm",
+                "dataset": dataset,
+                "checkpoint": None,
+                "fraction": 1.0,
+                "n_epochs": 10,
+                "model_name": f"base_lstm_{dataset}_h{lstm_hidden}_{coords_str}",
+                "batch_size": 256 if lstm_hidden == 64 else 128,
+                "learning_rate": 1e-3,
+                "sigma": 10,
+                "type_label": "gaussian",
+                "max_distance": 100,
+                "lstm_hidden": lstm_hidden,
+                "lstm_layers": 2,
+                "dropout": 0.2,
+                "use_coords": use_coords,
+            })
 
 LOGDIR = "test_outputs/logs"
 FIGDIR = "test_outputs/figures"
@@ -188,6 +99,7 @@ def build_model(
     dropout: float = 0.2,
     base_channels: int = 64,
     lstm_layers: int = 2,
+    use_coords: bool = False,
 ) -> tuple[torch.nn.Module, str]:
     """
     Return (model, pipeline_model_type) where pipeline_model_type controls
@@ -211,6 +123,7 @@ def build_model(
             lstm_hidden=lstm_hidden,
             lstm_layers=lstm_layers,
             dropout=dropout,
+            use_coords=use_coords,
         )
         pipeline_type = "eqtransformer"  # 6000-sample window for this model
 
@@ -330,6 +243,7 @@ def build_loaders(
     type_label: str,
     max_distance: int,
     oversample: bool,
+    use_coords: bool = False,
 ):
     """Build train / val / test DataLoaders from SeisBenchPipelineWrapper."""
     common = dict(
@@ -343,10 +257,10 @@ def build_loaders(
 
     print(f"\nLoading {dataset.upper()} dataset (pipeline={pipeline_type})…")
     train_pipe = SeisBenchPipelineWrapper(
-        split="train", dataset_fraction=fraction, oversample_magnitudes=oversample, **common
+        split="train", dataset_fraction=fraction, oversample_magnitudes=oversample, use_coords=use_coords, **common
     )
-    val_pipe = SeisBenchPipelineWrapper(split="dev", **common)
-    test_pipe = SeisBenchPipelineWrapper(split="test", **common)
+    val_pipe = SeisBenchPipelineWrapper(split="dev", use_coords=use_coords, **common)
+    test_pipe = SeisBenchPipelineWrapper(split="test", use_coords=use_coords, **common)
 
     train_loader = train_pipe.get_dataloader(
         batch_size=batch_size, num_workers=16, shuffle=True
@@ -377,6 +291,7 @@ def main(config):
         dropout=config.get("dropout", 0.2),
         base_channels=config.get("base_channels", 64),
         lstm_layers=config.get("lstm_layers", 2),
+        use_coords=config.get("use_coords", False),
     )
     train_loader, val_loader, test_loader = build_loaders(
         dataset=config["dataset"],
@@ -387,6 +302,7 @@ def main(config):
         type_label=config["type_label"],
         max_distance=config["max_distance"],
         oversample=config.get("oversample", False),
+        use_coords=config.get("use_coords", False),
     )
 
     model, metrics = train(

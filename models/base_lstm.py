@@ -100,8 +100,10 @@ class SeismicPicker(nn.Module):
         lstm_hidden: int = 128,
         lstm_layers: int = 2,
         dropout: float = 0.2,
+        use_coords: bool = False,
     ):
         super().__init__()
+        self.use_coords = use_coords
 
         # Stem: project 3 raw channels → base_channels
         # kernel_size=7 → 70ms receptive field at 100Hz
@@ -148,13 +150,15 @@ class SeismicPicker(nn.Module):
 
         lstm_out = lstm_hidden * 2  # bidirectional doubles hidden size
 
+        head_in = lstm_out + 2 if self.use_coords else lstm_out
+
         # Independent heads per phase
         # WHY 1x1 conv (= linear per timestep): the LSTM already has full
         # temporal context; no wide kernel needed at this stage
-        self.head_p = nn.Conv1d(lstm_out, 1, kernel_size=1)
-        self.head_s = nn.Conv1d(lstm_out, 1, kernel_size=1)
+        self.head_p = nn.Conv1d(head_in, 1, kernel_size=1)
+        self.head_s = nn.Conv1d(head_in, 1, kernel_size=1)
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, coords: torch.Tensor = None):
         """
         Args:
             x: (B, 3, 6000) — normalized 3-component waveform from SeisBench
@@ -176,6 +180,13 @@ class SeismicPicker(nn.Module):
         x = self.lstm_dropout(x)
         x = x.permute(0, 2, 1)  # (B, 256, 1500) — back to (B, H, L) for Conv1d
 
+        if self.use_coords:
+            if coords is None:
+                raise ValueError("base_lstm instantiated with use_coords=True but no coords were provided to forward.")
+            # Map shape (B, 2) coords → (B, 2, 1500)
+            coords_expanded = coords.unsqueeze(2).expand(-1, -1, x.shape[2])
+            x = torch.cat([x, coords_expanded], dim=1) # Output (B, 258, 1500)
+
         logit_p = self.head_p(x).squeeze(1)  # (B, 1500)
         logit_s = self.head_s(x).squeeze(1)  # (B, 1500)
 
@@ -196,7 +207,7 @@ class SeismicPicker(nn.Module):
 
         return logit_p, logit_s  # raw logits — each (B, 6000)
 
-    def predict(self, x: torch.Tensor):
+    def predict(self, x: torch.Tensor, coords: torch.Tensor = None):
         """
         Convenience wrapper: returns sigmoid probabilities instead of logits.
         Equivalent to calling sigmoid(forward(x)).
@@ -205,5 +216,5 @@ class SeismicPicker(nn.Module):
             prob_p: (B, 6000) — P-wave arrival probability
             prob_s: (B, 6000) — S-wave arrival probability
         """
-        logit_p, logit_s = self.forward(x)
+        logit_p, logit_s = self.forward(x, coords=coords)
         return torch.sigmoid(logit_p), torch.sigmoid(logit_s)

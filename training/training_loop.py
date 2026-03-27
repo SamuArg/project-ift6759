@@ -39,7 +39,7 @@ torch.cuda.manual_seed(42)
 def _unpack_batch(batch):
     """
     Accept a SeisBench dict-batch and return
-    (waveform, label_p, label_s, label_det) with labels squeezed to (B, T).
+    (waveform, label_p, label_s, label_det, coords) with labels squeezed to (B, T).
 
     ProbabilisticLabeller outputs (B, 2, T): channel 0 = phase probability.
     DetectionLabeller outputs (B, T) or (B, 1, T): presence of any phase.
@@ -48,6 +48,7 @@ def _unpack_batch(batch):
     waveform = batch["X"]
     label_p = batch["y_p"][:, 0, :]  # (B, T) — phase probability
     label_s = batch["y_s"][:, 0, :]  # (B, T)
+    coords = batch.get("coords", None)
 
     # y_det is only in the batch when model_type="eqtransformer" was set in
     # the pipeline (DetectionLabeller is only added for that branch).
@@ -57,7 +58,7 @@ def _unpack_batch(batch):
         if label_det.ndim == 3:
             label_det = label_det[:, 0, :]
 
-    return waveform, label_p, label_s, label_det
+    return waveform, label_p, label_s, label_det, coords
 
 
 def _unpack_predictions(outputs):
@@ -254,18 +255,23 @@ def run_epoch(
 
     with torch.set_grad_enabled(is_training):
         for batch in tqdm(dataloader, desc=epoch_label, leave=False):
-            waveform, label_p, label_s, label_det = _unpack_batch(batch)
+            waveform, label_p, label_s, label_det, coords = _unpack_batch(batch)
             waveform = waveform.to(device)
             label_p = label_p.to(device)
             label_s = label_s.to(device)
             if label_det is not None:
                 label_det = label_det.to(device)
+            if coords is not None:
+                coords = coords.to(device)
 
             if is_training:
                 optimizer.zero_grad()
 
             with torch.amp.autocast("cuda", enabled=use_amp):
-                outputs = model(waveform)
+                if coords is not None and getattr(model, "use_coords", False):
+                    outputs = model(waveform, coords=coords)
+                else:
+                    outputs = model(waveform)
                 loss = loss_fn(outputs, label_p, label_s, label_det)
 
             if is_training:

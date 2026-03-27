@@ -105,11 +105,12 @@ def train_magnitude(
 
 if __name__ == "__main__":
     # Small test run (fraction=0.01) to verify it works
-    train_magnitude(dataset_name="STEAD", epochs=50, fraction=1, model_name="mag_predictor_stead_200_coords", window_len=200, use_coords=True)
-    train_magnitude(dataset_name="STEAD", epochs=50, fraction=1, model_name="mag_predictor_stead_100_coords", window_len=100, use_coords=True)
-    train_magnitude(dataset_name="STEAD", epochs=50, fraction=1, model_name="mag_predictor_stead_50_coords", window_len=50, use_coords=True)
-    train_magnitude(dataset_name="STEAD", epochs=50, fraction=1, model_name="mag_predictor_stead_25_coords", window_len=25, use_coords=True)
-    train_magnitude(dataset_name="INSTANCE", epochs=50, fraction=1, model_name="mag_predictor_instance_200_coords", window_len=200, use_coords=True)
+    # train_magnitude(dataset_name="STEAD", epochs=50, fraction=1, model_name="mag_predictor_stead_200_coords", window_len=200, use_coords=True)
+    # train_magnitude(dataset_name="STEAD", epochs=50, fraction=1, model_name="mag_predictor_stead_100_coords", window_len=100, use_coords=True)
+    # train_magnitude(dataset_name="STEAD", epochs=50, fraction=1, model_name="mag_predictor_stead_50_coords", window_len=50, use_coords=True)
+    # train_magnitude(dataset_name="STEAD", epochs=50, fraction=1, model_name="mag_predictor_stead_25_coords", window_len=25, use_coords=True)
+    # train_magnitude(dataset_name="INSTANCE", epochs=50, fraction=1, model_name="mag_predictor_instance_200_coords", window_len=200, use_coords=True)
+    
     train_magnitude(dataset_name="INSTANCE", epochs=50, fraction=1, model_name="mag_predictor_instance_100_coords", window_len=100, use_coords=True)
     train_magnitude(dataset_name="INSTANCE", epochs=50, fraction=1, model_name="mag_predictor_instance_50_coords", window_len=50, use_coords=True)
     train_magnitude(dataset_name="INSTANCE", epochs=50, fraction=1, model_name="mag_predictor_instance_25_coords", window_len=25, use_coords=True)

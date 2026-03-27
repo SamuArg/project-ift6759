@@ -10,13 +10,15 @@ from types import SimpleNamespace
 import numpy as np
 
 class Sta_Lta:
-  def __init__(self, sta : float, lta : float, sampling_rate : float,
-            low_band_pass_freq=1.0,
-            upper_band_pass_freq=45.0,
-            num_ar_p=2,
-            num_ar_s=2,
-            var_window_length_p=0.2,
-            var_window_length_s=0.2,):
+  def __init__(self, sampling_rate: float,
+               sta: float = 0.8,
+               lta: float = 0.8,
+               low_band_pass_freq=1.0,
+               upper_band_pass_freq=15.0,
+               num_ar_p=6,
+               num_ar_s=6,
+               var_window_length_p=0.8,
+               var_window_length_s=0.8):
     """
     Parameters:
         sta: short term avergae window size (seconds)
@@ -40,15 +42,35 @@ class Sta_Lta:
 
     order = metadata["trace_component_order"]
     z_idx, n_idx, e_idx = order.index("Z"), order.index("N"), order.index("E") 
-    trace_z = trace[z_idx]
-    trace_n = trace[n_idx]
-    trace_e = trace[e_idx]
+    trace_z = np.ascontiguousarray(trace[z_idx], dtype=np.float64)
+    trace_n = np.ascontiguousarray(trace[n_idx], dtype=np.float64)
+    trace_e = np.ascontiguousarray(trace[e_idx], dtype=np.float64)
+    
+    trace_z = np.nan_to_num(trace_z, nan=0.0)
+    trace_n = np.nan_to_num(trace_n, nan=0.0)
+    trace_e = np.nan_to_num(trace_e, nan=0.0)
+
+    # Safeguard trace length
+    min_length = int(max(self.lta_window_sec_p, self.lta_window_sec_s) * self.sampling_rate)
+    if trace_z.shape[0] <= min_length:
+        if verbose:
+            print("Trace too short for LTA window.")
+        return -1.0, -1.0
+        
+    # Safeguard filter frequencies (f2 must be < Nyquist)
+    nyquist = self.sampling_rate / 2.0
+    f2 = min(self.upper_band_pass_freq, nyquist - 1.0)
+    f1 = min(self.low_band_pass_freq, f2 - 1.0)
+    if f1 <= 0:
+        if verbose:
+            print("Invalid frequency band.")
+        return -1.0, -1.0
 
     p_arrival, s_arrival = ar_pick(
       trace_z, trace_n, trace_e, 
       samp_rate=self.sampling_rate, 
-      f1=self.low_band_pass_freq, 
-      f2=self.upper_band_pass_freq, 
+      f1=f1, 
+      f2=f2, 
       lta_p=self.lta_window_sec_p,
       sta_p=self.sta_window_sec_p,
       lta_s=self.lta_window_sec_s,

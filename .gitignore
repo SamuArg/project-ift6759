@@ -45,3 +45,4 @@ test_outputs/
 .env
 *.pem
 results.txt
+stalta.txt
