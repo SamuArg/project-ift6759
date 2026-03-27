@@ -9,15 +9,27 @@ class AddCoords:
         self.key = key
 
     def __call__(self, state_dict):
-        lat_cols = ["station_latitude_deg", "station_latitude", "receiver_latitude", "trace_station_latitude"]
-        lon_cols = ["station_longitude_deg", "station_longitude", "receiver_longitude", "trace_station_longitude"]
-        
-        lat = next((state_dict[c] for c in lat_cols if c in state_dict), float('nan'))
-        lon = next((state_dict[c] for c in lon_cols if c in state_dict), float('nan'))
-        
-        if np.isnan(lat): lat = 0.0
-        if np.isnan(lon): lon = 0.0
-        
+        lat_cols = [
+            "station_latitude_deg",
+            "station_latitude",
+            "receiver_latitude",
+            "trace_station_latitude",
+        ]
+        lon_cols = [
+            "station_longitude_deg",
+            "station_longitude",
+            "receiver_longitude",
+            "trace_station_longitude",
+        ]
+
+        lat = next((state_dict[c] for c in lat_cols if c in state_dict), float("nan"))
+        lon = next((state_dict[c] for c in lon_cols if c in state_dict), float("nan"))
+
+        if np.isnan(lat):
+            lat = 0.0
+        if np.isnan(lon):
+            lon = 0.0
+
         # SeisBench state_dict arrays must be stored as (array, metadata_dict) tuples
         state_dict[self.key] = (np.array([lat, lon], dtype=np.float32), None)
         return state_dict
@@ -83,7 +95,6 @@ class SeisBenchPipelineWrapper:
         elif self.split == "test":
             self.dataset = dataset.test()
 
-        # ── Drop traces that have a P pick but no S pick ─────────────────────
         # Pure noise traces (no P, no S) are kept for detection learning.
         # Only ambiguous traces (P present, S missing) are dropped.
         s_col_candidates = ["trace_s_arrival_sample", "trace_S_arrival_sample"]
@@ -172,25 +183,28 @@ class SeisBenchPipelineWrapper:
         Returns a 1D numpy array of indices to pass to a torch Subset.
         """
         import pandas as pd
+
         meta = self.dataset.metadata
         n_original = len(meta)
 
         # 1. Identify magnitude column
         mag_cols = ["source_magnitude", "event_magnitude", "source_mag"]
         mag_col = next((c for c in mag_cols if c in meta.columns), None)
-        
+
         if mag_col is None:
-            print("Warning: oversample_magnitudes=True but no magnitude column found. Skipping.")
+            print(
+                "Warning: oversample_magnitudes=True but no magnitude column found. Skipping."
+            )
             return None
 
         print(f"Oversampling magnitudes (column: '{mag_col}')...")
         mags = meta[mag_col].values
-        
+
         # 2. Assign each trace to a bin ID
         # Bins: 0=Noise, 1=[0,1), 2=[1,2), 3=[2,3), 4=[3,4), 5=[4,5), 6=[5,6), 7=[6,∞)
         bin_edges = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
         bin_ids = np.zeros(n_original, dtype=int)  # 0 is noise (where mag is NaN)
-        
+
         valid_mask = ~pd.isna(mags)
         # Use np.digitize for the valid magnitudes.
         # Digitize returns indices 1..len(bins) based on where the value falls.
@@ -205,7 +219,7 @@ class SeisBenchPipelineWrapper:
         # 4. Oversample minority bins
         balanced_indices = []
         original_indices = np.arange(n_original)
-        
+
         for b_id, b_count in zip(unique_bins, counts):
             idx_in_bin = original_indices[bin_ids == b_id]
             if b_count == max_count:
@@ -220,14 +234,16 @@ class SeisBenchPipelineWrapper:
                     label = f"M>={bin_edges[-1]}"
                 else:
                     label = f"M[{bin_edges[b_id-1]},{bin_edges[b_id]})"
-                print(f"  Oversampled '{label}': {b_count} → {max_count}")
+                print(f"  Oversampled '{label}': {b_count} -> {max_count}")
 
         # Flatten and shuffle
         balanced_indices = np.concatenate(balanced_indices)
         np.random.shuffle(balanced_indices)
 
         # 5. Return the shuffled oversampled indices
-        print(f"Oversampling complete: index array grew from {n_original} to {len(balanced_indices)} traces.")
+        print(
+            f"Oversampling complete: index array grew from {n_original} to {len(balanced_indices)} traces."
+        )
         return balanced_indices
 
     def _build_steered_generator(self):
@@ -368,10 +384,9 @@ class SeisBenchPipelineWrapper:
             )
 
         if self.use_coords:
-            augmentations.extend([
-                AddCoords(key="coords"),
-                sbg.ChangeDtype(np.float32, key="coords")
-            ])
+            augmentations.extend(
+                [AddCoords(key="coords"), sbg.ChangeDtype(np.float32, key="coords")]
+            )
 
         self.generator.add_augmentations(augmentations)
 

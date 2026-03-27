@@ -1,7 +1,9 @@
 import numpy as np
 
 
-def evaluate_seismic_detection(predictions, ground_truth, tolerance=0.1, magnitudes=None):
+def evaluate_seismic_detection(
+    predictions, ground_truth, tolerance=0.1, magnitudes=None
+):
     """
     Evaluate seismic wave detection for P-waves and S-waves.
 
@@ -83,7 +85,10 @@ def evaluate_seismic_detection(predictions, ground_truth, tolerance=0.1, magnitu
 
     if magnitudes is not None:
         _print_magnitude_breakdown(
-            p_pred, s_pred, p_true, s_true,
+            p_pred,
+            s_pred,
+            p_true,
+            s_true,
             np.array(magnitudes, dtype=float),
             tolerance,
         )
@@ -98,7 +103,11 @@ def _compute_metrics(pred, true, tolerance):
     n = int(has_arrival.sum())
 
     both_valid = has_arrival & model_fired
-    mae = float(np.mean(np.abs(pred[both_valid] - true[both_valid]))) if both_valid.any() else float("nan")
+    mae = (
+        float(np.mean(np.abs(pred[both_valid] - true[both_valid])))
+        if both_valid.any()
+        else float("nan")
+    )
 
     within_tol = model_fired & has_arrival & (np.abs(pred - true) <= tolerance)
     tp = within_tol.sum()
@@ -106,8 +115,12 @@ def _compute_metrics(pred, true, tolerance):
     fn = has_arrival.sum() - tp
 
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1        = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if (precision + recall) > 0
+        else 0.0
+    )
 
     return n, mae, float(precision), float(recall), float(f1)
 
@@ -136,8 +149,12 @@ def _print_magnitude_breakdown(p_pred, s_pred, p_true, s_true, magnitudes, toler
         mask = (magnitudes >= lo) & (magnitudes < hi)
         if mask.sum() < 2:
             continue
-        n_p, mae_p, prec_p, rec_p, f1_p = _compute_metrics(p_pred[mask], p_true[mask], tolerance)
-        n_s, mae_s, prec_s, rec_s, f1_s = _compute_metrics(s_pred[mask], s_true[mask], tolerance)
+        n_p, mae_p, prec_p, rec_p, f1_p = _compute_metrics(
+            p_pred[mask], p_true[mask], tolerance
+        )
+        n_s, mae_s, prec_s, rec_s, f1_s = _compute_metrics(
+            s_pred[mask], s_true[mask], tolerance
+        )
         n = max(n_p, n_s)
         label = f"[{lo}, {hi})"
         mae_p_str = f"{mae_p:.4f}" if not np.isnan(mae_p) else "   N/A "

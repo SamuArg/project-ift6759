@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from models.unet_parts import EncoderBlock, DecoderBlock
 
+
 class SeismicPickerUNet(nn.Module):
     """
     U-Net CNN + BiLSTM bottleneck seismic phase picker. (From Step 1 Upgrade)
@@ -12,13 +13,14 @@ class SeismicPickerUNet(nn.Module):
         Decoder:  256+128->128 -> 128+64->64 -> 64+32->32 -> upsample to 6000
         Heads: two independent 1x1 convs -> sigmoid
     """
+
     def __init__(
         self,
-        in_channels: int   = 3,
-        base_ch: int       = 32,
-        lstm_hidden: int   = 128,
-        lstm_layers: int   = 2,
-        dropout: float     = 0.2,
+        in_channels: int = 3,
+        base_ch: int = 32,
+        lstm_hidden: int = 128,
+        lstm_layers: int = 2,
+        dropout: float = 0.2,
     ):
         super().__init__()
 
@@ -28,9 +30,9 @@ class SeismicPickerUNet(nn.Module):
             nn.ReLU(),
         )
 
-        self.enc1 = EncoderBlock(base_ch,     base_ch * 2,  dilation=1)
-        self.enc2 = EncoderBlock(base_ch * 2, base_ch * 4,  dilation=2)
-        self.enc3 = EncoderBlock(base_ch * 4, base_ch * 8,  dilation=4)
+        self.enc1 = EncoderBlock(base_ch, base_ch * 2, dilation=1)
+        self.enc2 = EncoderBlock(base_ch * 2, base_ch * 4, dilation=2)
+        self.enc3 = EncoderBlock(base_ch * 4, base_ch * 8, dilation=4)
 
         bottleneck_ch = base_ch * 8
 
@@ -50,8 +52,8 @@ class SeismicPickerUNet(nn.Module):
         )
 
         self.dec1 = DecoderBlock(bottleneck_ch, base_ch * 4, base_ch * 4)
-        self.dec2 = DecoderBlock(base_ch * 4,  base_ch * 2, base_ch * 2)
-        self.dec3 = DecoderBlock(base_ch * 2,  base_ch,     base_ch)
+        self.dec2 = DecoderBlock(base_ch * 4, base_ch * 2, base_ch * 2)
+        self.dec3 = DecoderBlock(base_ch * 2, base_ch, base_ch)
 
         self.final_conv = nn.Sequential(
             nn.Conv1d(base_ch, base_ch, kernel_size=7, padding=3),

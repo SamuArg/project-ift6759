@@ -1,18 +1,3 @@
-"""
-Training entry point — real models, real data.
-
-Trains a seismic phase-picking model using the SeisBenchPipelineWrapper
-and evaluates it on the test split using run_evaluation().
-
-Supported models:
-  - "base_lstm"      : SeismicPicker (CNN + BiLSTM), trained from scratch
-  - "phasenet"       : Pretrained SeisBench PhaseNet, fine-tuned
-  - "eqtransformer"  : Pretrained SeisBench EQTransformer, fine-tuned
-
-Run from project root:
-    python training/test_training.py
-"""
-
 import sys
 import os
 
@@ -27,18 +12,8 @@ from training.training_loop import train
 from analysis.run_evaluation import run_evaluation
 import numpy as np
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CONFIG  ←  edit this block to switch model / dataset / hyperparameters
-# ─────────────────────────────────────────────────────────────────────────────
-
 # model : "base_lstm" | "phasenet" | "eqtransformer"
-# dataset : "stead" | "instance" | "geofon" | "txed"
-# checkpoint : See build_model() for resolution order. Examples:
-#   None                  → base_lstm: random init; phasenet/eqtransformer: default pretrained
-#   "instance"            → phasenet/eqtransformer: from_pretrained("instance")
-#   "stead"               → phasenet/eqtransformer: from_pretrained("stead")
-#   "path/to/weights.pth" → any model: load_state_dict from local .pth file
-#   "path/to/sb_dir/"     → phasenet/eqtransformer: SeisBench .load() from local dir
+# dataset : "stead" | "instance"
 
 
 configs = []
@@ -46,38 +21,35 @@ for dataset in ["instance", "stead"]:
     for use_coords in [False, True]:
         for lstm_hidden in [64, 128]:
             coords_str = "coords" if use_coords else "nocoords"
-            configs.append({
-                "model": "base_lstm",
-                "dataset": dataset,
-                "checkpoint": None,
-                "fraction": 1.0,
-                "n_epochs": 10,
-                "model_name": f"base_lstm_{dataset}_h{lstm_hidden}_{coords_str}",
-                "batch_size": 64,
-                "learning_rate": 1e-3,
-                "sigma": 10,
-                "type_label": "gaussian",
-                "max_distance": 100,
-                "lstm_hidden": lstm_hidden,
-                "lstm_layers": 2,
-                "dropout": 0.2,
-                "use_coords": use_coords,
-            })
+            configs.append(
+                {
+                    "model": "base_lstm",
+                    "dataset": dataset,
+                    "checkpoint": None,
+                    "fraction": 1.0,
+                    "n_epochs": 10,
+                    "model_name": f"base_lstm_{dataset}_h{lstm_hidden}_{coords_str}",
+                    "batch_size": 64,
+                    "learning_rate": 1e-3,
+                    "sigma": 10,
+                    "type_label": "gaussian",
+                    "max_distance": 100,
+                    "lstm_hidden": lstm_hidden,
+                    "lstm_layers": 2,
+                    "dropout": 0.2,
+                    "use_coords": use_coords,
+                }
+            )
 
 LOGDIR = "test_outputs/logs"
 FIGDIR = "test_outputs/figures"
 MODELDIR = "test_outputs/models"
-# ─────────────────────────────────────────────────────────────────────────────
 
-# Set seed for reproducibility
 SEED = 42
 torch.manual_seed(SEED)
 np.random.seed(SEED)
 torch.cuda.manual_seed(SEED)
 
-
-# Known SeisBench pretrained weight keys per model class.
-# Any string that is NOT an existing path is treated as a pretrained name.
 _SB_PRETRAINED = {
     "phasenet": ["stead", "instance", "geofon", "scedc", "ethz", "neic", "original"],
     "eqtransformer": [
@@ -102,18 +74,10 @@ def build_model(
     use_coords: bool = False,
 ) -> tuple[torch.nn.Module, str]:
     """
-    Return (model, pipeline_model_type) where pipeline_model_type controls
-    which window length and augmentations the pipeline uses.
-
-    CHECKPOINT resolution order (applies to phasenet / eqtransformer):
-      1. None              → from_pretrained(default)
-      2. existing dir path → SeisBench .load(checkpoint)
-      3. existing .pth     → from_pretrained(default) then load_state_dict(.pth)
-      4. plain string      → from_pretrained(checkpoint)  ← NEW: e.g. "instance"
+    Return (model, pipeline_model_type).
     """
     is_local_dir = checkpoint is not None and os.path.isdir(checkpoint)
     is_local_file = checkpoint is not None and os.path.isfile(checkpoint)
-    # A plain name like "instance" or "stead" that is NOT an existing path
     is_sb_name = checkpoint is not None and not is_local_dir and not is_local_file
 
     if model_name == "base_lstm":
@@ -127,7 +91,6 @@ def build_model(
         )
         pipeline_type = "eqtransformer"  # 6000-sample window for this model
 
-        # For base_lstm checkpoint must be a local .pth (no SeisBench hub for it)
         if is_local_file:
             print(f"Loading base_lstm weights from {checkpoint} for fine-tuning…")
             model.load_state_dict(
@@ -146,7 +109,6 @@ def build_model(
             model = sbm.PhaseNet.from_pretrained(checkpoint)
             print(f"Loaded PhaseNet from_pretrained({checkpoint!r})")
         else:
-            # None → default pretrained; local .pth handled below
             model = sbm.PhaseNet.from_pretrained("stead")
             if is_local_file:
                 print(f"Loading PhaseNet weights from {checkpoint} for fine-tuning…")
@@ -175,6 +137,7 @@ def build_model(
 
     elif model_name == "unet":
         from models.Upgrade1_skip_connections import SeismicPickerUNet
+
         model = SeismicPickerUNet(
             in_channels=3,
             base_ch=32,
@@ -182,16 +145,21 @@ def build_model(
             lstm_layers=lstm_layers,
             dropout=dropout,
         )
-        pipeline_type = "phasenet"  # 3001 window, produces p, s 
+        pipeline_type = "phasenet"  # 3001 window, produces p, s
 
         if is_local_file:
             print(f"Loading unet weights from {checkpoint} for fine-tuning…")
-            model.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True))
+            model.load_state_dict(
+                torch.load(checkpoint, map_location="cpu", weights_only=True)
+            )
         elif checkpoint is not None:
-            raise ValueError(f"unet only supports a local .pth checkpoint, got: {checkpoint!r}")
+            raise ValueError(
+                f"unet only supports a local .pth checkpoint, got: {checkpoint!r}"
+            )
 
     elif model_name == "unet_det":
         from models.Upgrade2_detection_head import SeismicPickerUNetDet
+
         model = SeismicPickerUNetDet(
             in_channels=3,
             base_ch=32,
@@ -199,16 +167,21 @@ def build_model(
             lstm_layers=lstm_layers,
             dropout=dropout,
         )
-        pipeline_type = "eqtransformer"  # 6000 window, produces det, p, s 
+        pipeline_type = "eqtransformer"  # 6000 window, produces det, p, s
 
         if is_local_file:
             print(f"Loading unet_det weights from {checkpoint} for fine-tuning…")
-            model.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True))
+            model.load_state_dict(
+                torch.load(checkpoint, map_location="cpu", weights_only=True)
+            )
         elif checkpoint is not None:
-            raise ValueError(f"unet_det only supports a local .pth checkpoint, got: {checkpoint!r}")
+            raise ValueError(
+                f"unet_det only supports a local .pth checkpoint, got: {checkpoint!r}"
+            )
 
     elif model_name == "bilstm":
         from models.bilstm import SeismicBiLSTM
+
         model = SeismicBiLSTM(
             in_channels=3,
             lstm_hidden=lstm_hidden,
@@ -219,9 +192,13 @@ def build_model(
 
         if is_local_file:
             print(f"Loading bilstm weights from {checkpoint} for fine-tuning…")
-            model.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True))
+            model.load_state_dict(
+                torch.load(checkpoint, map_location="cpu", weights_only=True)
+            )
         elif checkpoint is not None:
-            raise ValueError(f"bilstm only supports a local .pth checkpoint, got: {checkpoint!r}")
+            raise ValueError(
+                f"bilstm only supports a local .pth checkpoint, got: {checkpoint!r}"
+            )
 
     else:
         raise ValueError(
@@ -257,7 +234,11 @@ def build_loaders(
 
     print(f"\nLoading {dataset.upper()} dataset (pipeline={pipeline_type})…")
     train_pipe = SeisBenchPipelineWrapper(
-        split="train", dataset_fraction=fraction, oversample_magnitudes=oversample, use_coords=use_coords, **common
+        split="train",
+        dataset_fraction=fraction,
+        oversample_magnitudes=oversample,
+        use_coords=use_coords,
+        **common,
     )
     val_pipe = SeisBenchPipelineWrapper(split="dev", use_coords=use_coords, **common)
     test_pipe = SeisBenchPipelineWrapper(split="test", use_coords=use_coords, **common)
@@ -275,9 +256,7 @@ def build_loaders(
     return train_loader, val_loader, test_loader
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def main(config):
@@ -329,7 +308,7 @@ def main(config):
         test_loader=test_loader,
         confidence_threshold=0.3,
         noise_threshold=0.1,
-        tolerance=0.1,  # ±0.1 s = ±10 samples at 100 Hz
+        tolerance=0.1,
         device=device,
     )
 

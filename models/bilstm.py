@@ -2,23 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class SeismicBiLSTM(nn.Module):
-    """
-    Pure BiLSTM seismic phase picker (no CNN frontend).
-
-    Architecture:
-        (B, 3, 6000)
-        → Permute             : (B, 6000, 3)
-        → 2-layer BiLSTM      : captures full temporal sequence from raw 3C inputs
-        → Dropout
-        → Two Linear heads    : independent P and S heads
-
-    WARNING: Running LSTM directly on 6000 timesteps is computationally
-    expensive and slow compared to a CNN downsampled approach.
-
-    forward() returns raw **logits** (pre-sigmoid) so that BCEWithLogitsLoss can
-    be applied directly. Call predict() explicitly when you need probabilities.
-    """
+    """Pure BiLSTM seismic phase picker (no CNN frontend). Returns logits for P and S."""
 
     def __init__(
         self,
@@ -29,7 +15,6 @@ class SeismicBiLSTM(nn.Module):
     ):
         super().__init__()
 
-        # BiLSTM: captures temporal patterns directly from raw signal
         self.lstm = nn.LSTM(
             input_size=in_channels,
             hidden_size=lstm_hidden,
@@ -40,35 +25,20 @@ class SeismicBiLSTM(nn.Module):
         )
         self.lstm_dropout = nn.Dropout(dropout)
 
-        lstm_out = lstm_hidden * 2  # bidirectional doubles hidden size
+        lstm_out = lstm_hidden * 2
 
-        # Independent heads per phase
         self.head_p = nn.Linear(lstm_out, 1)
         self.head_s = nn.Linear(lstm_out, 1)
 
     def forward(self, x: torch.Tensor):
-        """
-        Args:
-            x: (B, 3, L) — normalized 3-component waveform from SeisBench
-
-        Returns:
-            logit_p: (B, L) — P-wave raw logits (pre-sigmoid)
-            logit_s: (B, L) — S-wave raw logits (pre-sigmoid)
-        """
-        # x is (B, 3, L)
-        x = x.permute(0, 2, 1)  # (B, L, 3) — LSTM expects (B, L, H)
-
-        x, _ = self.lstm(x)     # (B, L, H)
+        x = x.permute(0, 2, 1)
+        x, _ = self.lstm(x)
         x = self.lstm_dropout(x)
-
-        logit_p = self.head_p(x).squeeze(-1)  # (B, L)
-        logit_s = self.head_s(x).squeeze(-1)  # (B, L)
-
-        return logit_p, logit_s  # raw logits
+        logit_p = self.head_p(x).squeeze(-1)
+        logit_s = self.head_s(x).squeeze(-1)
+        return logit_p, logit_s
 
     def predict(self, x: torch.Tensor):
-        """
-        Convenience wrapper: returns sigmoid probabilities instead of logits.
-        """
+        """Returns sigmoid probabilities. Equivalent to sigmoid(forward(x))."""
         logit_p, logit_s = self.forward(x)
         return torch.sigmoid(logit_p), torch.sigmoid(logit_s)

@@ -12,9 +12,7 @@ from models.base_lstm import SeismicPicker
 from dataset.load_dataset import SeisBenchPipelineWrapper
 from analysis.run_evaluation import run_evaluation
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CONFIG  ← edit to match what you want to evaluate
-# ─────────────────────────────────────────────────────────────────────────────
+# CONFIG
 _BASE_LSTM_DEFAULTS = dict(
     CONFIDENCE_THR=0.3,
     TOLERANCE_S=0.1,
@@ -28,67 +26,66 @@ _BASE_LSTM_DEFAULTS = dict(
     base_channels=64,
 )
 
-# ── 8 trained base_lstm variants ──────────────────────────────────────────────
 configs = []
 for dataset in ["instance", "stead"]:
     for use_coords in [False, True]:
         for lstm_hidden in [64, 128]:
             coords_str = "coords" if use_coords else "nocoords"
             name = f"base_lstm_{dataset}_h{lstm_hidden}_{coords_str}"
-            configs.append({
-                **_BASE_LSTM_DEFAULTS,
-                "model_name":    "base_lstm",
-                "dataset":       dataset,
-                "model_dataset": dataset,
-                "checkpoint":    f"test_outputs/models/best_{name}.pth",
-                "hidden":        lstm_hidden,
-                "use_coords":    use_coords,
-                "label":         name,  # used for print / log
-            })
+            configs.append(
+                {
+                    **_BASE_LSTM_DEFAULTS,
+                    "model_name": "base_lstm",
+                    "dataset": dataset,
+                    "model_dataset": dataset,
+                    "checkpoint": f"test_outputs/models/best_{name}.pth",
+                    "hidden": lstm_hidden,
+                    "use_coords": use_coords,
+                    "label": name,
+                }
+            )
 
-# ── Pretrained PhaseNet — evaluated on both datasets ─────────────────────────
 for dataset in ["instance", "stead"]:
-    configs.append({
-        "model_name":    "phasenet",
-        "dataset":       dataset,
-        "model_dataset": dataset,   # from_pretrained(dataset)
-        "checkpoint":    None,
-        "CONFIDENCE_THR": 0.5,
-        "TOLERANCE_S":    0.1,
-        "SAMPLING_RATE":  100,
-        "N_PLOT":         0,
-        "PLOT_OUT":       None,
-        "N_MISSED":       0,
-        "MISSED_PLOT_OUT": None,
-        "hidden":         None,
-        "dropout":        None,
-        "use_coords":     False,
-        "label":          f"phasenet_pretrained_{dataset}",
-    })
+    configs.append(
+        {
+            "model_name": "phasenet",
+            "dataset": dataset,
+            "model_dataset": dataset,  # from_pretrained(dataset)
+            "checkpoint": None,
+            "CONFIDENCE_THR": 0.5,
+            "TOLERANCE_S": 0.1,
+            "SAMPLING_RATE": 100,
+            "N_PLOT": 0,
+            "PLOT_OUT": None,
+            "N_MISSED": 0,
+            "MISSED_PLOT_OUT": None,
+            "hidden": None,
+            "dropout": None,
+            "use_coords": False,
+            "label": f"phasenet_pretrained_{dataset}",
+        }
+    )
 
-# ── Pretrained EQTransformer — evaluated on both datasets ────────────────────
 for dataset in ["instance", "stead"]:
-    configs.append({
-        "model_name":    "eqtransformer",
-        "dataset":       dataset,
-        "model_dataset": dataset,   # from_pretrained(dataset)
-        "checkpoint":    None,
-        "CONFIDENCE_THR": 0.3,
-        "TOLERANCE_S":    0.1,
-        "SAMPLING_RATE":  100,
-        "N_PLOT":         0,
-        "PLOT_OUT":       None,
-        "N_MISSED":       0,
-        "MISSED_PLOT_OUT": None,
-        "hidden":         None,
-        "dropout":        None,
-        "use_coords":     False,
-        "label":          f"eqtransformer_pretrained_{dataset}",
-    })
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-# ── Model builders ────────────────────────────────────────────────────────────
+    configs.append(
+        {
+            "model_name": "eqtransformer",
+            "dataset": dataset,
+            "model_dataset": dataset,  # from_pretrained(dataset)
+            "checkpoint": None,
+            "CONFIDENCE_THR": 0.3,
+            "TOLERANCE_S": 0.1,
+            "SAMPLING_RATE": 100,
+            "N_PLOT": 0,
+            "PLOT_OUT": None,
+            "N_MISSED": 0,
+            "MISSED_PLOT_OUT": None,
+            "hidden": None,
+            "dropout": None,
+            "use_coords": False,
+            "label": f"eqtransformer_pretrained_{dataset}",
+        }
+    )
 
 
 def build_model(
@@ -114,7 +111,7 @@ def build_model(
                 dropout=dropout,
                 use_coords=use_coords,
             ),
-            "eqtransformer",  # 6000-sample window — must match train.py build_model()
+            "eqtransformer",  # 6000-sample window
         )
 
     elif model_name == "phasenet":
@@ -135,6 +132,7 @@ def build_model(
 
     elif model_name == "unet":
         from models.Upgrade1_skip_connections import SeismicPickerUNet
+
         return (
             SeismicPickerUNet(
                 in_channels=3,
@@ -148,6 +146,7 @@ def build_model(
 
     elif model_name == "unet_det":
         from models.Upgrade2_detection_head import SeismicPickerUNetDet
+
         return (
             SeismicPickerUNetDet(
                 in_channels=3,
@@ -161,6 +160,7 @@ def build_model(
 
     elif model_name == "bilstm":
         from models.bilstm import SeismicBiLSTM
+
         return (
             SeismicBiLSTM(
                 in_channels=3,
@@ -186,7 +186,6 @@ def load_checkpoint(model, checkpoint):
         return model
 
     if os.path.isdir(checkpoint):
-        # Already natively loaded by build_model
         return model
 
     if not os.path.exists(checkpoint):
@@ -199,9 +198,6 @@ def load_checkpoint(model, checkpoint):
     model.load_state_dict(weights)
     print(f"Loaded weights from {checkpoint}")
     return model
-
-
-# ── Prediction helper ─────────────────────────────────────────────────────────
 
 
 @torch.no_grad()
@@ -236,9 +232,6 @@ def predict_batch(model, batch, device):
     if s.min() < 0.0 or s.max() > 1.0:
         s = torch.sigmoid(s)
     return p, s
-
-
-# ── Plotting ──────────────────────────────────────────────────────────────────
 
 
 def plot_predictions(
@@ -330,7 +323,6 @@ def plot_predictions(
 
         wv = item["waveform"]  # (3, T)
 
-        # ── Waveform ─────────────────────────────────────────────────────
         channel_labels = ["Z", "N", "E"]
         colors_wv = ["#2d6a9f", "#3a9e6a", "#c97d2b"]
         for ch in range(min(3, wv.shape[0])):
@@ -353,7 +345,6 @@ def plot_predictions(
         ax_w.legend(loc="upper right", fontsize=6, ncol=5)
         ax_w.set_title(f"Trace {idx + 1}  P={p_t:.1f}s  S={s_t:.1f}s", fontsize=8)
 
-        # ── Probability curves ────────────────────────────────────────────
         ax_pp.plot(t, item["prob_p"], color="#e63946", lw=1.3, label="P prob")
         ax_pp.plot(t, item["prob_s"], color="#457b9d", lw=1.3, label="S prob")
         ax_pp.axhline(
@@ -372,9 +363,6 @@ def plot_predictions(
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"Plot saved to {out_path}")
-
-
-# ── Missed-detection plotting ─────────────────────────────────────────────────
 
 
 def plot_missed_detections(
@@ -426,7 +414,6 @@ def plot_missed_detections(
                 pp = prob_p[i].numpy()  # (T,)
                 ps = prob_s[i].numpy()  # (T,)
 
-                # ── Missed P ──────────────────────────────────────────────
                 if len(missed_p) < n and has_p[i].item():
                     if pp.max() < confidence_thr:  # model never fired for P
                         missed_p.append(
@@ -444,7 +431,6 @@ def plot_missed_detections(
                             }
                         )
 
-                # ── Missed S ──────────────────────────────────────────────
                 if len(missed_s) < n and has_s[i].item():
                     if ps.max() < confidence_thr:  # model never fired for S
                         missed_s.append(
@@ -470,7 +456,6 @@ def plot_missed_detections(
         f"Missed P examples found: {len(missed_p)}, missed S examples found: {len(missed_s)}"
     )
 
-    # ── Layout: missed-P section then missed-S section ─────────────────────────
     all_groups = []
     if missed_p:
         all_groups.append(("Missed P-wave detections", missed_p, "#e63946", "#457b9d"))
@@ -511,7 +496,6 @@ def plot_missed_detections(
                 T = wv.shape[1]
             t = np.arange(wv.shape[1]) / sampling_rate
 
-            # ── Waveform ─────────────────────────────────────────────────
             channel_labels = ["Z", "N", "E"]
             colors_wv = ["#2d6a9f", "#3a9e6a", "#c97d2b"]
             for ch in range(min(3, wv.shape[0])):
@@ -546,7 +530,6 @@ def plot_missed_detections(
                 fontsize=7,
             )
 
-            # ── Probability curves ────────────────────────────────────────
             ax_pp.plot(t, item["prob_p"], color="#e63946", lw=1.3, label="P prob")
             ax_pp.plot(t, item["prob_s"], color="#457b9d", lw=1.3, label="S prob")
             ax_pp.axhline(
@@ -586,9 +569,7 @@ def plot_missed_detections(
     print(f"Missed-detection plot saved to {out_path}")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Error violin plot
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def plot_error_violins(
@@ -609,9 +590,17 @@ def plot_error_violins(
     errors_p_plot = np.clip(errors_p, eps, None) if len(errors_p) > 0 else np.array([])
     errors_s_plot = np.clip(errors_s, eps, None) if len(errors_s) > 0 else np.array([])
 
-    data   = [d for d in [errors_p_plot, errors_s_plot] if len(d) > 0]
-    labels = [l for l, d in [("P-wave", errors_p_plot), ("S-wave", errors_s_plot)] if len(d) > 0]
-    colors = [c for c, d in [("#e63946", errors_p_plot), ("#457b9d", errors_s_plot)] if len(d) > 0]
+    data = [d for d in [errors_p_plot, errors_s_plot] if len(d) > 0]
+    labels = [
+        l
+        for l, d in [("P-wave", errors_p_plot), ("S-wave", errors_s_plot)]
+        if len(d) > 0
+    ]
+    colors = [
+        c
+        for c, d in [("#e63946", errors_p_plot), ("#457b9d", errors_s_plot)]
+        if len(d) > 0
+    ]
 
     fig, ax = plt.subplots(figsize=(7, 5))
 
@@ -646,14 +635,32 @@ def plot_error_violins(
     # Percentile markers + annotations
     for i, (errs, label, color) in enumerate(zip(data, labels, colors)):
         median = np.median(errs)
-        p95    = np.percentile(errs, 95)
+        p95 = np.percentile(errs, 95)
         ax.scatter(i, median, color="white", zorder=5, s=40)
-        ax.axhline(p95, xmin=(i + 0.05) / len(data), xmax=(i + 0.95) / len(data),
-                   color=color, linewidth=1.2, linestyle="--", alpha=0.7)
-        ax.text(i + 0.32, median,  f"med={median:.3f}s",  va="center", fontsize=8, color="white",
-                fontweight="bold",
-                bbox=dict(boxstyle="round,pad=0.2", facecolor=color, alpha=0.7, edgecolor="none"))
-        ax.text(i + 0.32, p95,     f"p95={p95:.3f}s",     va="bottom", fontsize=7.5, color=color)
+        ax.axhline(
+            p95,
+            xmin=(i + 0.05) / len(data),
+            xmax=(i + 0.95) / len(data),
+            color=color,
+            linewidth=1.2,
+            linestyle="--",
+            alpha=0.7,
+        )
+        ax.text(
+            i + 0.32,
+            median,
+            f"med={median:.3f}s",
+            va="center",
+            fontsize=8,
+            color="white",
+            fontweight="bold",
+            bbox=dict(
+                boxstyle="round,pad=0.2", facecolor=color, alpha=0.7, edgecolor="none"
+            ),
+        )
+        ax.text(
+            i + 0.32, p95, f"p95={p95:.3f}s", va="bottom", fontsize=7.5, color=color
+        )
 
     ax.set_yscale("log")
     ax.set_xticks(range(len(labels)))
@@ -664,17 +671,35 @@ def plot_error_violins(
     # Reference lines (text moved inside right edge to avoid x-axis labels)
     for ref_s, ref_label in [(0.1, "±0.1 s tol"), (0.5, "0.5 s"), (1.0, "1 s")]:
         ax.axhline(ref_s, color="gray", linewidth=0.8, linestyle=":", alpha=0.6)
-        ax.text(len(data) - 0.55, ref_s, ref_label, va="bottom", ha="left",
-                fontsize=8, color="gray")
+        ax.text(
+            len(data) - 0.55,
+            ref_s,
+            ref_label,
+            va="bottom",
+            ha="left",
+            fontsize=8,
+            color="gray",
+        )
 
     # Summary stats table below
     for i, (errs, label) in enumerate(zip(data, labels)):
         pct_within_tol = 100 * (errs <= 0.1).sum() / len(errs)
-        pct_over_1s    = 100 * (errs >  1.0).sum() / len(errs)
-        ax.text(i, ax.get_ylim()[0] * 0.6,
-                f"n={len(errs):,}\n≤0.1s: {pct_within_tol:.1f}%\n>1s: {pct_over_1s:.1f}%",
-                ha="center", va="top", fontsize=7.5, color="#333333",
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="#f0f0f0", alpha=0.8, edgecolor="none"))
+        pct_over_1s = 100 * (errs > 1.0).sum() / len(errs)
+        ax.text(
+            i,
+            ax.get_ylim()[0] * 0.6,
+            f"n={len(errs):,}\n≤0.1s: {pct_within_tol:.1f}%\n>1s: {pct_over_1s:.1f}%",
+            ha="center",
+            va="top",
+            fontsize=7.5,
+            color="#333333",
+            bbox=dict(
+                boxstyle="round,pad=0.3",
+                facecolor="#f0f0f0",
+                alpha=0.8,
+                edgecolor="none",
+            ),
+        )
 
     plt.tight_layout()
     if out_path is not None:
@@ -687,34 +712,34 @@ def plot_error_violins(
         plt.close(fig)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def main(configs):
     for config in configs:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model_name   = config["model_name"]
-        dataset      = config["dataset"]
-        model_dataset= config["model_dataset"]
-        checkpoint   = config["checkpoint"]
-        label        = config.get("label", f"{model_name}_{dataset}")
-        CONFIDENCE_THR  = config["CONFIDENCE_THR"]
-        TOLERANCE_S     = config["TOLERANCE_S"]
-        SAMPLING_RATE   = config["SAMPLING_RATE"]
-        N_PLOT          = config["N_PLOT"]
-        PLOT_OUT        = config["PLOT_OUT"]
-        N_MISSED        = config["N_MISSED"]
+        model_name = config["model_name"]
+        dataset = config["dataset"]
+        model_dataset = config["model_dataset"]
+        checkpoint = config["checkpoint"]
+        label = config.get("label", f"{model_name}_{dataset}")
+        CONFIDENCE_THR = config["CONFIDENCE_THR"]
+        TOLERANCE_S = config["TOLERANCE_S"]
+        SAMPLING_RATE = config["SAMPLING_RATE"]
+        N_PLOT = config["N_PLOT"]
+        PLOT_OUT = config["PLOT_OUT"]
+        N_MISSED = config["N_MISSED"]
         MISSED_PLOT_OUT = config["MISSED_PLOT_OUT"]
-        lstm_hidden  = config["hidden"]
-        dropout      = config["dropout"]
-        base_channels= config.get("base_channels", 64)
-        lstm_layers  = config.get("lstm_layers", 2)
-        use_coords   = config.get("use_coords", False)
+        lstm_hidden = config["hidden"]
+        dropout = config["dropout"]
+        base_channels = config.get("base_channels", 64)
+        lstm_layers = config.get("lstm_layers", 2)
+        use_coords = config.get("use_coords", False)
 
         print("\n" + "=" * 80)
-        print(f"Evaluating: {label}  |  dataset: {dataset.upper()}  |  checkpoint: {checkpoint}")
+        print(
+            f"Evaluating: {label}  |  dataset: {dataset.upper()}  |  checkpoint: {checkpoint}"
+        )
         print("=" * 80 + "\n")
 
         model, pipeline_type = build_model(
@@ -753,10 +778,14 @@ def main(configs):
         gen_meta = getattr(test_pipe.generator, "metadata", None)
         if gen_meta is not None and mag_col in gen_meta.columns:
             eval_magnitudes = gen_meta[mag_col].to_numpy(dtype=float)
-            print(f"  Magnitude column found: {(~np.isnan(eval_magnitudes)).sum()} non-NaN values")
+            print(
+                f"  Magnitude column found: {(~np.isnan(eval_magnitudes)).sum()} non-NaN values"
+            )
         else:
             eval_magnitudes = None
-            print("  Warning: 'source_magnitude' not found in dataset metadata — skipping magnitude breakdown.")
+            print(
+                "  Warning: 'source_magnitude' not found in dataset metadata — skipping magnitude breakdown."
+            )
 
         print(f"\nRunning seismic pick evaluation…")
         results = run_evaluation(
@@ -769,7 +798,9 @@ def main(configs):
             magnitudes=eval_magnitudes,
         )
 
-        violin_out = PLOT_OUT.replace(".png", f"_error_violin.png") if PLOT_OUT else None
+        violin_out = (
+            PLOT_OUT.replace(".png", f"_error_violin.png") if PLOT_OUT else None
+        )
         plot_error_violins(
             results=results,
             model_name=label,

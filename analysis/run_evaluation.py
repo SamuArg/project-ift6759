@@ -9,15 +9,7 @@ except ImportError:
 
 
 def _extract_p_s_predictions(preds):
-    """
-    Unpack model output into (p_prob_map, s_prob_map) tensors of shape [B, T],
-    always in probability space [0, 1].
-
-    Handles:
-      - PhaseNet        → tensor [B, 3, T]  (channel 0=P, 1=S, 2=noise)
-      - EQTransformer   → tuple (detection [B,T], p [B,T], s [B,T])
-      - SeismicPicker   → tuple (logit_p [B,T], logit_s [B,T])  ← logits post-fix
-    """
+    """Unpack model output into (p_prob_map, s_prob_map) tensors of shape [B, T] in probability space."""
     if isinstance(preds, tuple):
         p_map, s_map = (preds[1], preds[2]) if len(preds) >= 3 else (preds[0], preds[1])
         if p_map.ndim == 3:
