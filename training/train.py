@@ -53,7 +53,7 @@ for dataset in ["instance", "stead"]:
                 "fraction": 1.0,
                 "n_epochs": 10,
                 "model_name": f"base_lstm_{dataset}_h{lstm_hidden}_{coords_str}",
-                "batch_size": 256 if lstm_hidden == 64 else 128,
+                "batch_size": 64,
                 "learning_rate": 1e-3,
                 "sigma": 10,
                 "type_label": "gaussian",

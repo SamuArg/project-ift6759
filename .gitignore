@@ -46,3 +46,7 @@ test_outputs/
 *.pem
 results.txt
 stalta.txt
+magnitude_results.png
+.gitignore
+train_results.txt
+magntiude_results.txt
