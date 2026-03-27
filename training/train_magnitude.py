@@ -16,11 +16,18 @@ def train_epoch(model, loader, criterion, optimizer, device):
     total_loss = 0.0
     total_mae = 0.0
     
-    for x, y in tqdm(loader, desc="Training", leave=False):
+    for batch in tqdm(loader, desc="Training", leave=False):
+        if len(batch) == 3:
+            x, coords, y = batch
+            coords = coords.to(device)
+        else:
+            x, y = batch
+            coords = None
+            
         x, y = x.to(device), y.to(device)
         
         optimizer.zero_grad()
-        preds = model(x)
+        preds = model(x, coords=coords)
         loss = criterion(preds, y)
         loss.backward()
         optimizer.step()
@@ -37,9 +44,16 @@ def evaluate(model, loader, criterion, device):
     total_loss = 0.0
     total_mae = 0.0
     
-    for x, y in tqdm(loader, desc="Evaluating", leave=False):
+    for batch in tqdm(loader, desc="Evaluating", leave=False):
+        if len(batch) == 3:
+            x, coords, y = batch
+            coords = coords.to(device)
+        else:
+            x, y = batch
+            coords = None
+            
         x, y = x.to(device), y.to(device)
-        preds = model(x)
+        preds = model(x, coords=coords)
         loss = criterion(preds, y)
         
         total_loss += loss.item() * x.size(0)
@@ -55,16 +69,17 @@ def train_magnitude(
     lr=1e-3, 
     fraction=1.0, 
     model_name="mag_predictor",
-    window_len=200
+    window_len=200,
+    use_coords=False
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
     train_loader, val_loader, test_loader = build_loaders_magnitude(
-        dataset_name=dataset_name, fraction=fraction, batch_size=batch_size, window_len=window_len
+        dataset_name=dataset_name, fraction=fraction, batch_size=batch_size, window_len=window_len, use_coords=use_coords
     )
     
-    model = MagnitudePredictor().to(device)
+    model = MagnitudePredictor(use_coords=use_coords).to(device)
     criterion = nn.MSELoss() 
     optimizer = AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     
@@ -90,9 +105,11 @@ def train_magnitude(
 
 if __name__ == "__main__":
     # Small test run (fraction=0.01) to verify it works
-    train_magnitude(dataset_name="STEAD", epochs=50, fraction=1, model_name="mag_predictor_stead_100", window_len=100)
-    train_magnitude(dataset_name="STEAD", epochs=50, fraction=1, model_name="mag_predictor_stead_50", window_len=50)
-    train_magnitude(dataset_name="STEAD", epochs=50, fraction=1, model_name="mag_predictor_stead_25", window_len=25)
-    train_magnitude(dataset_name="INSTANCE", epochs=50, fraction=1, model_name="mag_predictor_instance_100", window_len=100)
-    train_magnitude(dataset_name="INSTANCE", epochs=50, fraction=1, model_name="mag_predictor_instance_50", window_len=50)
-    train_magnitude(dataset_name="INSTANCE", epochs=50, fraction=1, model_name="mag_predictor_instance_25", window_len=25)
+    train_magnitude(dataset_name="STEAD", epochs=50, fraction=1, model_name="mag_predictor_stead_200_coords", window_len=200, use_coords=True)
+    train_magnitude(dataset_name="STEAD", epochs=50, fraction=1, model_name="mag_predictor_stead_100_coords", window_len=100, use_coords=True)
+    train_magnitude(dataset_name="STEAD", epochs=50, fraction=1, model_name="mag_predictor_stead_50_coords", window_len=50, use_coords=True)
+    train_magnitude(dataset_name="STEAD", epochs=50, fraction=1, model_name="mag_predictor_stead_25_coords", window_len=25, use_coords=True)
+    train_magnitude(dataset_name="INSTANCE", epochs=50, fraction=1, model_name="mag_predictor_instance_200_coords", window_len=200, use_coords=True)
+    train_magnitude(dataset_name="INSTANCE", epochs=50, fraction=1, model_name="mag_predictor_instance_100_coords", window_len=100, use_coords=True)
+    train_magnitude(dataset_name="INSTANCE", epochs=50, fraction=1, model_name="mag_predictor_instance_50_coords", window_len=50, use_coords=True)
+    train_magnitude(dataset_name="INSTANCE", epochs=50, fraction=1, model_name="mag_predictor_instance_25_coords", window_len=25, use_coords=True)

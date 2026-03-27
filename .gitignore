@@ -44,3 +44,4 @@ test_outputs/
 # Secrets / environment variables
 .env
 *.pem
+results.txt

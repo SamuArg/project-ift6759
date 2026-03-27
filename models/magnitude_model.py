@@ -8,8 +8,10 @@ class MagnitudePredictor(nn.Module):
     Architecture:
       Deep Conv1d blocks -> BiLSTM -> Global Average Pooling -> Deep Linear Regressor
     """
-    def __init__(self, in_channels=3, base_channels=64, lstm_hidden=128, dropout=0.3):
+    def __init__(self, in_channels=3, base_channels=64, lstm_hidden=128, dropout=0.3, use_coords=False):
         super().__init__()
+        
+        self.use_coords = use_coords
         
         self.encoder = nn.Sequential(
             # Block 1: 200 -> 100
@@ -50,7 +52,7 @@ class MagnitudePredictor(nn.Module):
         )
         
         self.regressor = nn.Sequential(
-            nn.Linear(lstm_hidden * 2, 256),
+            nn.Linear(lstm_hidden * 2 + 2 if use_coords else lstm_hidden * 2, 256),
             nn.BatchNorm1d(256),
             nn.ReLU(),
             nn.Dropout(dropout),
@@ -63,10 +65,11 @@ class MagnitudePredictor(nn.Module):
             nn.Linear(128, 1) # Predicts a single magnitude scalar
         )
         
-    def forward(self, x):
+    def forward(self, x, coords=None):
         """
         Args:
             x: (B, 3, 200) normalized waveform centered on P-wave
+            coords: (B, 2) tensor of latitude and longitude (optional)
         Returns:
             mag: (B, 1) predicted scalar magnitude
         """
@@ -77,12 +80,23 @@ class MagnitudePredictor(nn.Module):
         
         x = x.mean(dim=1)               # Global Average Pooling over time (B, 256)
         
+        if self.use_coords:
+            if coords is None:
+                raise ValueError("Model expects coordinates but coords are None")
+            x = torch.cat([x, coords], dim=1) # (B, 258)
+        
         mag = self.regressor(x)         # (B, 1)
         return mag
 
 if __name__ == "__main__":
-    # Test model shape
-    model = MagnitudePredictor()
+    # Test model shape with coords
+    model_c = MagnitudePredictor(use_coords=True)
     x = torch.randn(16, 3, 200)
-    out = model(x)
-    print("Output shape:", out.shape) # Expected: (16, 1)
+    coords = torch.randn(16, 2)
+    out_c = model_c(x, coords)
+    print("Output shape (with coords):", out_c.shape) # Expected: (16, 1)
+    
+    # Test model shape without coords
+    model_nc = MagnitudePredictor(use_coords=False)
+    out_nc = model_nc(x)
+    print("Output shape (no coords):", out_nc.shape) # Expected: (16, 1)

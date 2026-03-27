@@ -18,12 +18,13 @@ def evaluate_magnitude_model(
     dataset_name="INSTANCE",
     batch_size=128,
     fraction=1.0,
-    window_len=200
+    window_len=200,
+    use_coords=False
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Loading model from {model_path} onto {device}...")
     
-    model = MagnitudePredictor().to(device)
+    model = MagnitudePredictor(use_coords=use_coords).to(device)
     if os.path.exists(model_path):
         model.load_state_dict(torch.load(model_path, map_location=device))
     else:
@@ -33,7 +34,7 @@ def evaluate_magnitude_model(
     
     # We only need the test loader
     _, _, test_loader = build_loaders_magnitude(
-        dataset_name=dataset_name, fraction=fraction, batch_size=batch_size, window_len=window_len
+        dataset_name=dataset_name, fraction=fraction, batch_size=batch_size, window_len=window_len, use_coords=use_coords
     )
     
     all_preds = []
@@ -44,9 +45,16 @@ def evaluate_magnitude_model(
     total_mae = 0.0
     
     print("Evaluating on test set...")
-    for x, y in test_loader:
+    for batch in test_loader:
+        if len(batch) == 3:
+            x, coords, y = batch
+            coords = coords.to(device)
+        else:
+            x, y = batch
+            coords = None
+            
         x, y = x.to(device), y.to(device)
-        preds = model(x)
+        preds = model(x, coords=coords)
         
         loss = criterion(preds, y)
         total_loss += loss.item() * x.size(0)
@@ -96,5 +104,5 @@ if __name__ == "__main__":
     for dataset in datasets:
         for size in input_sizes:
             print(f"Testing {dataset} with input size {size}")
-            model_path = os.path.join("test_outputs", "models", f"mag_predictor_{dataset.lower()}_{size}.pth")
-            evaluate_magnitude_model(model_path, dataset_name=dataset, fraction=1, window_len=size)
+            model_path = os.path.join("test_outputs", "models", f"mag_predictor_{dataset.lower()}_{size}_coords.pth")
+            evaluate_magnitude_model(model_path, dataset_name=dataset, fraction=1, window_len=size, use_coords=True)
