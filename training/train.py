@@ -19,7 +19,7 @@ import numpy as np
 configs = []
 for dataset in ["instance", "stead"]:
     for use_coords in [False, True]:
-        for lstm_hidden in [64, 128]:
+        for lstm_hidden in [128, 64]:
             coords_str = "coords" if use_coords else "nocoords"
             configs.append(
                 {
@@ -28,8 +28,8 @@ for dataset in ["instance", "stead"]:
                     "checkpoint": None,
                     "fraction": 1.0,
                     "n_epochs": 10,
-                    "model_name": f"base_lstm_{dataset}_h{lstm_hidden}_{coords_str}",
-                    "batch_size": 64,
+                    "model_name": f"base_lstm_{dataset}_h{lstm_hidden}_{coords_str}_10epochs_phasenet_window",
+                    "batch_size": 128,
                     "learning_rate": 1e-3,
                     "sigma": 10,
                     "type_label": "gaussian",
@@ -38,6 +38,8 @@ for dataset in ["instance", "stead"]:
                     "lstm_layers": 2,
                     "dropout": 0.2,
                     "use_coords": use_coords,
+                    "normalize": True,
+                    "pipeline_type_override": "phasenet",
                 }
             )
 
@@ -221,6 +223,7 @@ def build_loaders(
     max_distance: int,
     oversample: bool,
     use_coords: bool = False,
+    normalize: bool = True,
 ):
     """Build train / val / test DataLoaders from SeisBenchPipelineWrapper."""
     common = dict(
@@ -230,6 +233,7 @@ def build_loaders(
         transformation_shape=type_label,
         transformation_sigma=sigma,
         max_distance=max_distance,
+        normalize=normalize,
     )
 
     print(f"\nLoading {dataset.upper()} dataset (pipeline={pipeline_type})…")
@@ -272,9 +276,11 @@ def main(config):
         lstm_layers=config.get("lstm_layers", 2),
         use_coords=config.get("use_coords", False),
     )
+    # Allow config to override the pipeline type (window size) independently of model
+    loader_pipeline_type = config.get("pipeline_type_override", pipeline_type)
     train_loader, val_loader, test_loader = build_loaders(
         dataset=config["dataset"],
-        pipeline_type=pipeline_type,
+        pipeline_type=loader_pipeline_type,
         fraction=config["fraction"],
         batch_size=config["batch_size"],
         sigma=config["sigma"],
@@ -282,6 +288,7 @@ def main(config):
         max_distance=config["max_distance"],
         oversample=config.get("oversample", False),
         use_coords=config.get("use_coords", False),
+        normalize=config.get("normalize", True),
     )
 
     model, metrics = train(

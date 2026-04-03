@@ -48,6 +48,7 @@ class SeisBenchPipelineWrapper:
         dataset_fraction=1.0,
         oversample_magnitudes=False,
         use_coords=False,
+        normalize=True,
     ):
         """
         A unified wrapper to generate training pipelines for various seismic models using SeisBench.
@@ -71,6 +72,7 @@ class SeisBenchPipelineWrapper:
         self.dataset_fraction = dataset_fraction
         self.oversample_magnitudes = oversample_magnitudes
         self.use_coords = use_coords
+        self.normalize = normalize
 
         print(f"Loading {self.dataset_name} ({self.split} split)...")
         if self.dataset_name == "STEAD":
@@ -343,16 +345,19 @@ class SeisBenchPipelineWrapper:
                 [sbg.SteeredWindow(windowlen=window_len, strategy="pad")]
             )
 
-        norm_kwargs = {"amp_norm_axis": -1, "amp_norm_type": "peak"}
-        if self.model_type == "eqtransformer":
-            norm_kwargs["detrend_axis"] = -1
-        else:
-            norm_kwargs["demean_axis"] = -1
+        normalize_aug = []
+        if self.normalize:
+            norm_kwargs = {"amp_norm_axis": -1, "amp_norm_type": "peak"}
+            if self.model_type == "eqtransformer":
+                norm_kwargs["detrend_axis"] = -1
+            else:
+                norm_kwargs["demean_axis"] = -1
+            normalize_aug = [sbg.Normalize(**norm_kwargs)]
 
         augmentations.extend(
             [
                 sbg.ChangeDtype(np.float32),
-                sbg.Normalize(**norm_kwargs),
+                *normalize_aug,
                 sbg.ProbabilisticLabeller(
                     label_columns=[p_col],
                     shape=self.transformation_shape,
