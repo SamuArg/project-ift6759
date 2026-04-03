@@ -3,6 +3,9 @@ import seisbench.data as sbd
 import seisbench.generate as sbg
 from torch.utils.data import DataLoader, Subset
 
+INSTRUMENT_CODES = ["HH", "BH", "EH", "HN", "SH", "other"]
+INSTRUMENT_CODE_TO_IDX = {c: i for i, c in enumerate(INSTRUMENT_CODES)}
+N_INSTRUMENT_CLASSES = len(INSTRUMENT_CODES)  # 6
 
 class AddCoords:
     def __init__(self, key="coords"):
@@ -34,6 +37,64 @@ class AddCoords:
         state_dict[self.key] = (np.array([lat, lon], dtype=np.float32), None)
         return state_dict
 
+class AddVS30:
+    # Nom de la colonne dans INSTANCE (non disponible dans STEAD)
+    VS30_COL = "station_vs_30_mps"
+ 
+    def __init__(self, key: str = "vs30"):
+        self.key = key
+ 
+    def __call__(self, state_dict: dict) -> dict:
+        raw = state_dict.get(self.VS30_COL, None)
+ 
+        # Conversion sûre en float
+        try:
+            vs30 = float(raw) if raw is not None else float("nan")
+        except (TypeError, ValueError):
+            vs30 = float("nan")
+ 
+        # Transformation log10 (fallback à 0.0 si invalide)
+        if np.isnan(vs30) or vs30 <= 0.0:
+            log_vs30 = 0.0
+        else:
+            log_vs30 = float(np.log10(vs30))
+ 
+        state_dict[self.key] = (np.array([log_vs30], dtype=np.float32), None)
+        return state_dict
+
+class AddInstrument:
+    # Ordre de priorité : INSTANCE en premier, STEAD en second
+    CHANNEL_COLS = ["station_channels", "trace_channel"]
+ 
+    def __init__(self, key: str = "instrument"):
+        self.key = key
+ 
+    def __call__(self, state_dict: dict) -> dict:
+        # 1. Trouver la colonne disponible dans ce batch
+        raw = None
+        for col in self.CHANNEL_COLS:
+            val = state_dict.get(col, None)
+            if val is not None:
+                raw = val
+                break
+ 
+        # 2. Extraire les 2 premiers caractères du code SEED
+        code = "other"
+        if raw is not None:
+            s = str(raw).strip().upper()
+            if len(s) >= 2:
+                prefix = s[:2]
+                # Si le code est dans notre vocabulaire → on l'utilise
+                # Sinon → "other"
+                code = prefix if prefix in INSTRUMENT_CODE_TO_IDX else "other"
+ 
+        # 3. Encodage one-hot
+        idx = INSTRUMENT_CODE_TO_IDX[code]
+        one_hot = np.zeros(N_INSTRUMENT_CLASSES, dtype=np.float32)
+        one_hot[idx] = 1.0
+ 
+        state_dict[self.key] = (one_hot, None)
+        return state_dict
 
 class SeisBenchPipelineWrapper:
     def __init__(
@@ -48,6 +109,8 @@ class SeisBenchPipelineWrapper:
         dataset_fraction=1.0,
         oversample_magnitudes=False,
         use_coords=False,
+        use_vs30 = False,
+        use_instrument: bool = False,
     ):
         """
         A unified wrapper to generate training pipelines for various seismic models using SeisBench.
@@ -71,6 +134,16 @@ class SeisBenchPipelineWrapper:
         self.dataset_fraction = dataset_fraction
         self.oversample_magnitudes = oversample_magnitudes
         self.use_coords = use_coords
+        self.use_vs30 = use_vs30
+        self.use_instrument = use_instrument
+
+        # Avertissement si VS30 demandé sur STEAD
+        if self.use_vs30 and self.dataset_name == "STEAD":
+            print(
+                "WARNING : use_vs30=True avec STEAD — la colonne station_vs_30_mps "
+                "est absente dans STEAD. Toutes les valeurs VS30 seront 0.0 (fallback). "
+                "Désactiver use_vs30 pour STEAD ou ignorer si intentionnel."
+            )
 
         print(f"Loading {self.dataset_name} ({self.split} split)...")
         if self.dataset_name == "STEAD":
@@ -386,6 +459,19 @@ class SeisBenchPipelineWrapper:
         if self.use_coords:
             augmentations.extend(
                 [AddCoords(key="coords"), sbg.ChangeDtype(np.float32, key="coords")]
+            )
+
+        if self.use_vs30:
+            augmentations.extend(
+                [AddVS30(key="vs30"), sbg.ChangeDtype(np.float32, key="vs30")]
+            )
+        
+        if self.use_instrument:
+            augmentations.extend(
+                [
+                    AddInstrument(key="instrument"),
+                    sbg.ChangeDtype(np.float32, key="instrument"),
+                ]
             )
 
         self.generator.add_augmentations(augmentations)
