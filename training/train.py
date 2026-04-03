@@ -38,6 +38,8 @@ for dataset in ["instance", "stead"]:
                     "lstm_layers": 2,
                     "dropout": 0.2,
                     "use_coords": use_coords,
+                    "use_vs30": False,
+                    "use_instrument": False,
                 }
             )
 
@@ -72,6 +74,8 @@ def build_model(
     base_channels: int = 64,
     lstm_layers: int = 2,
     use_coords: bool = False,
+    use_vs30: bool = False,
+    use_instrument: bool = False,
 ) -> tuple[torch.nn.Module, str]:
     """
     Return (model, pipeline_model_type).
@@ -88,7 +92,18 @@ def build_model(
             lstm_layers=lstm_layers,
             dropout=dropout,
             use_coords=use_coords,
+            use_vs30=use_vs30,
+            use_instrument=use_instrument,
         )
+        # Log récapitulatif des features activées
+        active = [f for f, flag in [
+            ("coords", use_coords),
+            ("vs30", use_vs30),
+            ("instrument", use_instrument)
+        ] if flag]
+        if active:
+            print(f"  Features contextuelles actives : {', '.join(active)}")
+
         pipeline_type = "eqtransformer"  # 6000-sample window for this model
 
         if is_local_file:
@@ -221,6 +236,8 @@ def build_loaders(
     max_distance: int,
     oversample: bool,
     use_coords: bool = False,
+    use_vs30: bool = False,
+    use_instrument: bool = False,
 ):
     """Build train / val / test DataLoaders from SeisBenchPipelineWrapper."""
     common = dict(
@@ -230,6 +247,8 @@ def build_loaders(
         transformation_shape=type_label,
         transformation_sigma=sigma,
         max_distance=max_distance,
+        use_vs30=use_vs30,
+        use_instrument=use_instrument,
     )
 
     print(f"\nLoading {dataset.upper()} dataset (pipeline={pipeline_type})…")
@@ -271,6 +290,8 @@ def main(config):
         base_channels=config.get("base_channels", 64),
         lstm_layers=config.get("lstm_layers", 2),
         use_coords=config.get("use_coords", False),
+        use_vs30=config.get("use_vs30", False),
+        use_instrument=config.get("use_instrument", False),
     )
     train_loader, val_loader, test_loader = build_loaders(
         dataset=config["dataset"],
@@ -282,6 +303,8 @@ def main(config):
         max_distance=config["max_distance"],
         oversample=config.get("oversample", False),
         use_coords=config.get("use_coords", False),
+        use_vs30=config.get("use_vs30", False),
+        use_instrument=config.get("use_instrument", False),
     )
 
     model, metrics = train(
