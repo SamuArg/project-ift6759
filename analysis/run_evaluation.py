@@ -70,9 +70,13 @@ def run_evaluation(
             X = batch["X"].to(device)
             y_p = batch["y_p"]
             y_s = batch["y_s"]
-            coords = batch.get("coords", None)
-            if coords is not None:
-                coords = coords.to(device)
+            call_kwargs = {}
+            for key in ["coords", "vs30", "instrument"]:
+                val = batch.get(key, None)
+                if val is not None:
+                    val = val.to(device)
+                    if getattr(model, f"use_{key}", False):
+                        call_kwargs[key] = val
 
             if y_p.ndim == 3:
                 y_p = y_p[:, 0, :]
@@ -84,10 +88,7 @@ def run_evaluation(
             p_true_sample = torch.argmax(y_p, dim=1)
             s_true_sample = torch.argmax(y_s, dim=1)
 
-            if coords is not None and getattr(model, "use_coords", False):
-                p_map, s_map = _extract_p_s_predictions(model(X, coords=coords))
-            else:
-                p_map, s_map = _extract_p_s_predictions(model(X))
+            p_map, s_map = _extract_p_s_predictions(model(X, **call_kwargs))
 
             p_probs, p_pred_sample = torch.max(p_map, dim=1)
             s_probs, s_pred_sample = torch.max(s_map, dim=1)
