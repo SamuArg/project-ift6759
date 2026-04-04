@@ -7,6 +7,7 @@ from torch.optim.lr_scheduler import OneCycleLR
 from pathlib import Path
 from tqdm import tqdm
 from scipy.signal import stft
+from scipy.signal import decimate
 from pywt import cwt
 
 from cwt_unet import UNetPhasePicker
@@ -21,7 +22,7 @@ except ImportError:
     from dataset.load_dataset import SeisBenchPipelineWrapper
 
 
-def cwt_transform(traces, sf, cwt_widths=None):
+def cwt_transform(traces, sf, down_sample_factor, cwt_widths=None):
     """
     Converts 3-component seismic traces to 3-channel time-frequency representations.
     
@@ -35,6 +36,9 @@ def cwt_transform(traces, sf, cwt_widths=None):
         log_spectrogram: log-scaled amplitude spectrogram
         (frequencies, times): Tuples of frequency and time axes
     """
+
+    traces = decimate(traces, q=down_sample_factor, axis=-1)
+    sf = sf / down_sample_factor
     num_channels, num_samples = traces.shape
         
     # Default widths (scales) if none are provided. 
@@ -46,7 +50,7 @@ def cwt_transform(traces, sf, cwt_widths=None):
     frequencies = None
     
     # 'mexh' is the PyWavelets identifier for the Mexican Hat (Ricker) wavelet
-    wavelet = 'mexh'
+    wavelet = 'cmor1.5-1.0'
     
     for i in range(num_channels):
         # cwt calculates both the coefficients and the proper frequencies.

@@ -33,14 +33,14 @@ class SimpleConv(nn.Module):
     
 class Down(nn.Module):
     """Downscaling with maxpool then double conv"""
-    def __init__(self, in_channels, out_channels, simple):
+    def __init__(self, in_channels, out_channels, simple, max_kernel):
         super().__init__()
         if simple:
             conv_layer = SimpleConv(in_channels=in_channels, out_channels=out_channels)
         else:
             conv_layer = DoubleConv(in_channels, out_channels)
         self.maxpool_conv = nn.Sequential(
-            nn.MaxPool2d(2),
+            nn.MaxPool2d(max_kernel),
             conv_layer
         )
 
@@ -49,10 +49,10 @@ class Down(nn.Module):
 
 class Up(nn.Module):
     """Upscaling then double conv with skip connections"""
-    def __init__(self, in_channels, out_channels, simple):
+    def __init__(self, in_channels, out_channels, simple, up_kernel=(2, 2), up_stride=(2, 2)):
         super().__init__()
         # Use ConvTranspose2d to physically upsample the grid
-        self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
+        self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=up_kernel, stride=up_stride)
         if simple:
             self.conv = SimpleConv(in_channels, out_channels)
         else:
@@ -85,21 +85,27 @@ class UNetPhasePicker(nn.Module):
             self.inc = SimpleConv(in_channels, base_channels)
         else:
             self.inc = DoubleConv(in_channels, base_channels)             # 3 -> 16
-        self.down1 = Down(base_channels, base_channels * 2, simple)           # 16 -> 32
-        self.down2 = Down(base_channels * 2, base_channels * 4, simple)       # 32 -> 64
-        self.down3 = Down(base_channels * 4, base_channels * 8, simple)       # 64 -> 128
+        self.down1 = Down(base_channels, base_channels * 2, simple, (2, 1))           # 16 -> 32
+        self.down2 = Down(base_channels * 2, base_channels * 4, simple, 2)       # 32 -> 64
+        self.down3 = Down(base_channels * 4, base_channels * 8, simple, 2)       # 64 -> 128
         
         # --- Decoder (Upsampling) ---
         self.up1 = Up(base_channels * 8, base_channels * 4, simple)           # 128 -> 64
         self.up2 = Up(base_channels * 4, base_channels * 2, simple)           # 64 -> 32
-        self.up3 = Up(base_channels * 2, base_channels, simple)               # 32 -> 16
+        self.up3 = Up(base_channels * 2, base_channels, simple, up_kernel=(2, 1), up_stride=(2, 1))               # 32 -> 16
         
+        self.freq_attention = nn.Sequential(
+            nn.Conv2d(base_channels, 1, kernel_size=1),
+            nn.Softmax(dim=2) # Apply softmax across the frequency axis (dim=2)
+        )
+
         # --- Output Heads ---
         # We calculate the head input channels. 
         head_in_channels = base_channels + (coord_channels if use_coords else 0)
         
         self.head_p = nn.Conv1d(head_in_channels, 1, kernel_size=1)
         self.head_s = nn.Conv1d(head_in_channels, 1, kernel_size=1)
+
 
     def forward(self, x: torch.Tensor, coords: torch.Tensor = None):
         # x shape: (B, 3, F, T) -> e.g., (Batch, 3, 128, 12000)
@@ -115,11 +121,15 @@ class UNetPhasePicker(nn.Module):
         x = self.up2(x, x2)
         x = self.up3(x, x1)    # Output shape: (B, 16, F, T)
         
-        # --- Frequency Compression ---
-        # Instead of a Conv2d, we take the max activation across the frequency 
-        # dimension (dim=2). This removes the frequency axis entirely, leaving (B, 16, T).
-        # This is brilliant because it works dynamically for any number of frequency bins!
-        x = torch.max(x, dim=2)[0] 
+        ## --- Frequency Compression via Soft Attention ---
+        # 1. Compute attention weights: shape (B, 1, F, T)
+        attn_weights = self.freq_attention(x)
+        
+        # 2. Multiply features by weights, then sum over the frequency dimension
+        # x * attn_weights broadcasts the weights across the 16 channels.
+        # .sum(dim=2) collapses the frequency axis.
+        # Output shape: (B, 16, T)
+        x = (x * attn_weights).sum(dim=2)
         
         # --- Coordinate Integration ---
         if self.use_coords:
