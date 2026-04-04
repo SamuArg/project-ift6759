@@ -240,6 +240,7 @@ def build_loaders(
     use_coords: bool = False,
     use_vs30: bool = False,
     use_instrument: bool = False,
+    normalize: bool = True,
 ):
     """Build train / val / test DataLoaders from SeisBenchPipelineWrapper."""
     common = dict(
@@ -251,6 +252,7 @@ def build_loaders(
         max_distance=max_distance,
         use_vs30=use_vs30,
         use_instrument=use_instrument,
+        normalize=normalize,
     )
 
     print(f"\nLoading {dataset.upper()} dataset (pipeline={pipeline_type})…")
@@ -295,9 +297,11 @@ def main(config):
         use_vs30=config.get("use_vs30", False),
         use_instrument=config.get("use_instrument", False),
     )
+    # Allow config to override the pipeline type (window size) independently of model
+    loader_pipeline_type = config.get("pipeline_type_override", pipeline_type)
     train_loader, val_loader, test_loader = build_loaders(
         dataset=config["dataset"],
-        pipeline_type=pipeline_type,
+        pipeline_type=loader_pipeline_type,
         fraction=config["fraction"],
         batch_size=config["batch_size"],
         sigma=config["sigma"],
@@ -307,6 +311,7 @@ def main(config):
         use_coords=config.get("use_coords", False),
         use_vs30=config.get("use_vs30", False),
         use_instrument=config.get("use_instrument", False),
+        normalize=config.get("normalize", True),
     )
 
     model, metrics = train(
