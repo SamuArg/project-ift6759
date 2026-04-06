@@ -16,6 +16,7 @@ except ImportError:
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
     from dataset.load_dataset import SeisBenchPipelineWrapper
 
+N_INSTRUMENT_CLASSES: int = 6
 
 class ResidualConvBlock(nn.Module):
     """Two Conv1d layers with a skip connection and BatchNorm."""
@@ -50,9 +51,13 @@ class SeismicPicker(nn.Module):
         lstm_layers: int = 2,
         dropout: float = 0.2,
         use_coords: bool = False,
+        use_vs30: bool = False,
+        use_instrument: bool = False,
     ):
         super().__init__()
         self.use_coords = use_coords
+        self.use_vs30 = use_vs30
+        self.use_instrument = use_instrument
 
         self.stem = nn.Sequential(
             nn.Conv1d(in_channels, base_channels, kernel_size=7, padding=3),
@@ -89,13 +94,19 @@ class SeismicPicker(nn.Module):
         )
         self.lstm_dropout = nn.Dropout(dropout)
 
-        lstm_out = lstm_hidden * 2
-        head_in = lstm_out + 2 if self.use_coords else lstm_out
+        lstm_out = lstm_hidden * 2          # 256 si lstm_hidden=128
+        head_in = lstm_out
+        if self.use_coords:
+            head_in += 2                    # lat + lon
+        if self.use_vs30:
+            head_in += 1                    # log10(VS30)
+        if self.use_instrument:
+            head_in += N_INSTRUMENT_CLASSES # one-hot 6 classes
 
         self.head_p = nn.Conv1d(head_in, 1, kernel_size=1)
         self.head_s = nn.Conv1d(head_in, 1, kernel_size=1)
 
-    def forward(self, x: torch.Tensor, coords: torch.Tensor = None):
+    def forward(self, x: torch.Tensor, coords: torch.Tensor = None, vs30: torch.Tensor = None, instrument: torch.Tensor = None):
         B, C, L = x.shape
 
         x = self.stem(x)
@@ -107,27 +118,57 @@ class SeismicPicker(nn.Module):
         x = self.lstm_dropout(x)
         x = x.permute(0, 2, 1)
 
+        T = x.shape[2]  # taille temporelle après downsample
+        features = [x]
+ 
         if self.use_coords:
             if coords is None:
                 raise ValueError(
-                    "base_lstm instantiated with use_coords=True but no coords were provided to forward."
+                    "SeismicPicker(use_coords=True) mais aucun tensor 'coords' "
+                    "n'a été fourni à forward()."
                 )
-            coords_expanded = coords.unsqueeze(2).expand(-1, -1, x.shape[2])
-            x = torch.cat([x, coords_expanded], dim=1)
-
-        logit_p = self.head_p(x).squeeze(1)
-        logit_s = self.head_s(x).squeeze(1)
-
+            # (B, 2) → (B, 2, T)
+            features.append(coords.unsqueeze(2).expand(-1, -1, T))
+ 
+        if self.use_vs30:
+            if vs30 is None:
+                raise ValueError(
+                    "SeismicPicker(use_vs30=True) mais aucun tensor 'vs30' "
+                    "n'a été fourni à forward()."
+                )
+            # (B, 1) → (B, 1, T)
+            features.append(vs30.unsqueeze(2).expand(-1, -1, T))
+ 
+        if self.use_instrument:
+            if instrument is None:
+                raise ValueError(
+                    "SeismicPicker(use_instrument=True) mais aucun tensor "
+                    "'instrument' n'a été fourni à forward()."
+                )
+            # (B, 6) → (B, 6, T)
+            features.append(instrument.unsqueeze(2).expand(-1, -1, T))
+ 
+        # Concatenation sur la dimension des canaux
+        if len(features) > 1:
+            x = torch.cat(features, dim=1)   # → (B, head_in, T)
+        # Si aucune feature additionnelle, x reste (B, lstm_out, T)
+ 
+        logit_p = self.head_p(x).squeeze(1)  # → (B, T)
+        logit_s = self.head_s(x).squeeze(1)  # → (B, T)
+ 
+        # Réinterpolation à la taille originale L 
         logit_p = F.interpolate(
             logit_p.unsqueeze(1), size=L, mode="linear", align_corners=False
         ).squeeze(1)
         logit_s = F.interpolate(
             logit_s.unsqueeze(1), size=L, mode="linear", align_corners=False
         ).squeeze(1)
-
+ 
         return logit_p, logit_s
 
-    def predict(self, x: torch.Tensor, coords: torch.Tensor = None):
+    def predict(self, x: torch.Tensor, coords: torch.Tensor = None, vs30: torch.Tensor = None, instrument: torch.Tensor = None):
         """Returns sigmoid probabilities. Equivalent to sigmoid(forward(x))."""
-        logit_p, logit_s = self.forward(x, coords=coords)
+        logit_p, logit_s = self.forward(
+            x, coords=coords, vs30=vs30, instrument=instrument
+        )
         return torch.sigmoid(logit_p), torch.sigmoid(logit_s)

@@ -19,29 +19,33 @@ from torch.utils.data import Dataset, DataLoader
 
 
 configs = []
-for dataset in ["instance", "stead"]:
-    for use_coords in [False, True]:
-        for lstm_hidden in [64, 128]:
-            coords_str = "coords" if use_coords else "nocoords"
-            configs.append(
-                {
-                    "model": "base_lstm",
-                    "dataset": dataset,
-                    "checkpoint": None,
-                    "fraction": 1.0,
-                    "n_epochs": 10,
-                    "model_name": f"base_lstm_{dataset}_h{lstm_hidden}_{coords_str}",
-                    "batch_size": 64,
-                    "learning_rate": 1e-3,
-                    "sigma": 10,
-                    "type_label": "gaussian",
-                    "max_distance": 100,
-                    "lstm_hidden": lstm_hidden,
-                    "lstm_layers": 2,
-                    "dropout": 0.2,
-                    "use_coords": use_coords,
-                }
-            )
+use_vs30 = True
+use_coords = False
+for dataset in ["instance"]:
+    for lstm_hidden in [64, 128]:
+        coords_str = "coords" if use_coords else "nocoords"
+        vs30_str = "vs30" if use_vs30 else "novs30"
+        configs.append(
+            {
+                "model": "base_lstm",
+                "dataset": dataset,
+                "checkpoint": None,
+                "fraction": 1.0,
+                "n_epochs": 10,
+                "model_name": f"base_lstm_{dataset}_h{lstm_hidden}_{coords_str}_{vs30_str}",
+                "batch_size": 64,
+                "learning_rate": 1e-3,
+                "sigma": 10,
+                "type_label": "gaussian",
+                "max_distance": 100,
+                "lstm_hidden": lstm_hidden,
+                "lstm_layers": 2,
+                "dropout": 0.2,
+                "use_coords": use_coords,
+                "use_vs30": use_vs30,
+                "use_instrument": False,
+            }
+        )
 
 LOGDIR = "test_outputs/logs"
 FIGDIR = "test_outputs/figures"
@@ -74,7 +78,9 @@ def build_model(
     base_channels: int = 64,
     lstm_layers: int = 2,
     use_coords: bool = False,
-    cwtUNet_simple: bool = False
+    cwtUNet_simple: bool = False,
+    use_vs30: bool = False,
+    use_instrument: bool = False,
 ) -> tuple[torch.nn.Module, str]:
     """
     Return (model, pipeline_model_type).
@@ -91,7 +97,18 @@ def build_model(
             lstm_layers=lstm_layers,
             dropout=dropout,
             use_coords=use_coords,
+            use_vs30=use_vs30,
+            use_instrument=use_instrument,
         )
+        # Log récapitulatif des features activées
+        active = [f for f, flag in [
+            ("coords", use_coords),
+            ("vs30", use_vs30),
+            ("instrument", use_instrument)
+        ] if flag]
+        if active:
+            print(f"  Features contextuelles actives : {', '.join(active)}")
+
         pipeline_type = "eqtransformer"  # 6000-sample window for this model
 
         if is_local_file:
@@ -248,6 +265,9 @@ def build_loaders(
     oversample: bool,
     use_coords: bool = False,
     apply_cwt: bool = False,
+    use_vs30: bool = False,
+    use_instrument: bool = False,
+    normalize: bool = True,
 ):
     """Build train / val / test DataLoaders from SeisBenchPipelineWrapper."""
     common = dict(
@@ -257,6 +277,9 @@ def build_loaders(
         transformation_shape=type_label,
         transformation_sigma=sigma,
         max_distance=max_distance,
+        use_vs30=use_vs30,
+        use_instrument=use_instrument,
+        normalize=normalize,
     )
 
     print(f"\nLoading {dataset.upper()} dataset (pipeline={pipeline_type})…")
@@ -342,10 +365,14 @@ def main(config):
         base_channels=config.get("base_channels", 64),
         lstm_layers=config.get("lstm_layers", 2),
         use_coords=config.get("use_coords", False),
+        use_vs30=config.get("use_vs30", False),
+        use_instrument=config.get("use_instrument", False),
     )
+    # Allow config to override the pipeline type (window size) independently of model
+    loader_pipeline_type = config.get("pipeline_type_override", pipeline_type)
     train_loader, val_loader, test_loader = build_loaders(
         dataset=config["dataset"],
-        pipeline_type=pipeline_type,
+        pipeline_type=loader_pipeline_type,
         fraction=config["fraction"],
         batch_size=config["batch_size"],
         sigma=config["sigma"],
@@ -354,6 +381,9 @@ def main(config):
         oversample=config.get("oversample", False),
         use_coords=config.get("use_coords", False),
         apply_cwt=config.get("apply_cwt", False),
+        use_vs30=config.get("use_vs30", False),
+        use_instrument=config.get("use_instrument", False),
+        normalize=config.get("normalize", True),
     )
 
     model, metrics = train(

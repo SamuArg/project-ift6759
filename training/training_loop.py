@@ -20,13 +20,15 @@ def _unpack_batch(batch):
     label_p = batch["y_p"][:, 0, :]
     label_s = batch["y_s"][:, 0, :]
     coords = batch.get("coords", None)
+    vs30       = batch.get("vs30", None)         
+    instrument = batch.get("instrument", None)   
 
     label_det = batch.get("y_det", None)
     if label_det is not None:
         if label_det.ndim == 3:
             label_det = label_det[:, 0, :]
 
-    return waveform, label_p, label_s, label_det, coords
+    return waveform, label_p, label_s, label_det, coords, vs30, instrument
 
 
 def _unpack_predictions(outputs):
@@ -158,7 +160,9 @@ def run_epoch(
 
     with torch.set_grad_enabled(is_training):
         for batch in tqdm(dataloader, desc=epoch_label, leave=False):
-            waveform, label_p, label_s, label_det, coords = _unpack_batch(batch)
+            waveform, label_p, label_s, label_det, coords, vs30, instrument = (
+                _unpack_batch(batch)
+            )
             waveform = waveform.to(device)
             label_p = label_p.to(device)
             label_s = label_s.to(device)
@@ -166,15 +170,24 @@ def run_epoch(
                 label_det = label_det.to(device)
             if coords is not None:
                 coords = coords.to(device)
+            if vs30 is not None:
+                vs30 = vs30.to(device)
+            if instrument is not None:
+                instrument = instrument.to(device)
 
             if is_training:
                 optimizer.zero_grad()
 
             with torch.amp.autocast("cuda", enabled=use_amp):
+                call_kwargs = {}
                 if coords is not None and getattr(model, "use_coords", False):
-                    outputs = model(waveform, coords=coords)
-                else:
-                    outputs = model(waveform)
+                    call_kwargs["coords"] = coords
+                if vs30 is not None and getattr(model, "use_vs30", False):
+                    call_kwargs["vs30"] = vs30
+                if instrument is not None and getattr(model, "use_instrument", False):
+                    call_kwargs["instrument"] = instrument
+ 
+                outputs = model(waveform, **call_kwargs)
                 loss = loss_fn(outputs, label_p, label_s, label_det)
 
             if is_training:
