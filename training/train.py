@@ -13,6 +13,7 @@ from analysis.run_evaluation import run_evaluation
 import numpy as np
 from dataset.cwtHDF5dataset import CWTHDF5Dataset
 from torch.utils.data import Dataset, DataLoader
+from models.cwt_unet import CWTUNetPhasePicker
 
 # model : "base_lstm" | "phasenet" | "eqtransformer" | "cwtUNet"
 # dataset : "stead" | "instance"
@@ -221,8 +222,6 @@ def build_model(
             )
     
     elif model_name == "cwtUNet":
-        from models.cwt_unet import CWTUNetPhasePicker
-
         model = CWTUNetPhasePicker(
             in_channels=3,
             base_channels=16,
@@ -264,10 +263,11 @@ def build_loaders(
     max_distance: int,
     oversample: bool,
     use_coords: bool = False,
-    apply_cwt: bool = False,
     use_vs30: bool = False,
     use_instrument: bool = False,
     normalize: bool = True,
+    h5_path: str=None,
+    meta_path: str=None,
 ):
     """Build train / val / test DataLoaders from SeisBenchPipelineWrapper."""
     common = dict(
@@ -283,6 +283,16 @@ def build_loaders(
     )
 
     print(f"\nLoading {dataset.upper()} dataset (pipeline={pipeline_type})…")
+
+    if pipeline_type == "cwtUNet":
+        return build_cwt_loaders(
+            h5_path=h5_path,
+            meta_path=meta_path,
+            fraction=fraction,
+            batch_size=batch_size,
+            sigma=sigma,
+            num_workers=16
+        )
     train_pipe = SeisBenchPipelineWrapper(
         split="train",
         dataset_fraction=fraction,
