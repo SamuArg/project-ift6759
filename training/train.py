@@ -80,6 +80,7 @@ def build_model(
     lstm_layers: int = 2,
     use_coords: bool = False,
     cwtUNet_simple: bool = False,
+    cwt_onTheFly: bool = True,
     use_vs30: bool = False,
     use_instrument: bool = False,
 ) -> tuple[torch.nn.Module, str]:
@@ -227,7 +228,8 @@ def build_model(
             base_channels=16,
             use_coords=False,
             coord_channels=2,
-            simple=cwtUNet_simple
+            simple=cwtUNet_simple,
+            cwt_onTheFly=cwt_onTheFly
         )
 
         pipeline_type = "cwtUNet"
@@ -268,6 +270,7 @@ def build_loaders(
     normalize: bool = True,
     h5_path: str=None,
     meta_path: str=None,
+    cwt_onTheFly: bool=True,
 ):
     """Build train / val / test DataLoaders from SeisBenchPipelineWrapper."""
     common = dict(
@@ -284,7 +287,7 @@ def build_loaders(
 
     print(f"\nLoading {dataset.upper()} dataset (pipeline={pipeline_type})…")
 
-    if pipeline_type == "cwtUNet":
+    if pipeline_type == "cwtUNet" and not cwt_onTheFly:
         return build_cwt_loaders(
             h5_path=h5_path,
             meta_path=meta_path,

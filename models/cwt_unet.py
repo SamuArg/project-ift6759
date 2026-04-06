@@ -1,6 +1,73 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
+import torchaudio
+
+class CWTBlock(nn.Module):
+    def __init__(self, sf=50.0, num_bins=32, f_min=1.0, f_max=45.0, B=1.5, C=1.0):
+        super().__init__()
+        self.sf = sf
+        
+        # 1. Generate logarithmic frequency bins and corresponding scales
+        freqs = torch.logspace(math.log10(f_min), math.log10(f_max), num_bins)
+        scales = C / (freqs * (1.0 / sf))
+        
+        # 2. Define the temporal grid for the wavelet
+        # The window length needs to be wide enough to capture the lowest frequency
+        max_scale = scales[0] 
+        window_len = int(10 * max_scale)
+        if window_len % 2 == 0:
+            window_len += 1 # Ensure there is a perfect center point
+            
+        t = torch.arange(-window_len // 2 + 1, window_len // 2 + 1)
+        
+        real_kernels = []
+        imag_kernels = []
+        
+        # 3. Construct the Complex Morlet wavelet mathematically for each scale
+        for s in scales:
+            x = t / s
+            norm = 1.0 / math.sqrt(math.pi * B)
+            gauss = torch.exp(-(x**2) / B)
+            
+            # Real and Imaginary components
+            real_w = norm * torch.cos(2 * math.pi * C * x) * gauss
+            imag_w = norm * torch.sin(2 * math.pi * C * x) * gauss
+            
+            # Normalize by 1/sqrt(s) to maintain energy across scales
+            real_w = real_w / math.sqrt(s)
+            imag_w = imag_w / math.sqrt(s)
+            
+            real_kernels.append(real_w)
+            imag_kernels.append(imag_w)
+            
+        # 4. Store as PyTorch buffers so they move to the GPU automatically 
+        # Shape for Conv1d: (Out_channels, In_channels, Kernel_size) -> (32, 1, window_len)
+        self.register_buffer("real_kernels", torch.stack(real_kernels).unsqueeze(1).float())
+        self.register_buffer("imag_kernels", torch.stack(imag_kernels).unsqueeze(1).float())
+        
+    def forward(self, x):
+        # Input shape: (Batch, 3 channels, Time)
+        B, C, T = x.shape
+        
+        # Reshape to treat the 3 seismic channels as independent batch items
+        # Shape becomes: (Batch * 3, 1, Time)
+        x = x.view(B * C, 1, T)
+        
+        # 5. Apply the wavelet filters using 1D convolution
+        # padding="same" ensures the temporal length remains unchanged
+        real_out = F.conv1d(x, self.real_kernels, padding='same')
+        imag_out = F.conv1d(x, self.imag_kernels, padding='same')
+        
+        # 6. Calculate the absolute magnitude of the complex result
+        mag = torch.sqrt(real_out**2 + imag_out**2)
+        
+        # 7. Reshape back to the 2D Spectrogram format
+        # Shape becomes: (Batch, 3 channels, 32 frequencies, Time)
+        mag = mag.view(B, C, -1, T)
+        
+        return mag
 
 class DoubleConv(nn.Module):
     """(Convolution => BatchNorm => ReLU) * 2"""
@@ -76,9 +143,15 @@ class CWTUNetPhasePicker(nn.Module):
     Lightweight 2D U-Net for CWT spectrograms.
     Returns P and S wave logits at the original temporal resolution.
     """
-    def __init__(self, in_channels=3, base_channels=16, use_coords=False, coord_channels=2, simple=False):
+    def __init__(self, in_channels=3, base_channels=16, use_coords=False, coord_channels=2, simple=False, cwt_onTheFly=True):
         super().__init__()
         self.use_coords = use_coords
+
+        # --- CWT block ---
+        self.cwt_onTheFly = cwt_onTheFly
+        if cwt_onTheFly:
+            self.resampler = torchaudio.transforms.Resample(orig_freq=100, new_freq=50)
+            self.cwtBlock = CWTBlock()
         
         # --- Encoder (Downsampling) ---
         if simple:
@@ -110,6 +183,11 @@ class CWTUNetPhasePicker(nn.Module):
     def forward(self, x: torch.Tensor, coords: torch.Tensor = None):
         # x shape: (B, 3, F, T) -> e.g., (Batch, 3, 128, 12000)
         
+        # --- CWT pass ---
+        if self.cwt_onTheFly:
+            x = self.resampler(x)
+            x = self.cwtBlock
+            x = torch.log1p(x)
         # --- Encoder pass ---
         x1 = self.inc(x)       # Skip 1
         x2 = self.down1(x1)    # Skip 2
