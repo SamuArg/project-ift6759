@@ -11,8 +11,11 @@ from dataset.load_dataset import SeisBenchPipelineWrapper
 from training.training_loop import train
 from analysis.run_evaluation import run_evaluation
 import numpy as np
+from dataset.cwtHDF5dataset import CWTHDF5Dataset
+from torch.utils.data import Dataset, DataLoader
+from models.cwt_unet import CWTUNetPhasePicker
 
-# model : "base_lstm" | "phasenet" | "eqtransformer"
+# model : "base_lstm" | "phasenet" | "eqtransformer" | "cwtUNet"
 # dataset : "stead" | "instance"
 
 
@@ -76,6 +79,7 @@ def build_model(
     base_channels: int = 64,
     lstm_layers: int = 2,
     use_coords: bool = False,
+    cwtUNet_simple: bool = False,
     use_vs30: bool = False,
     use_instrument: bool = False,
 ) -> tuple[torch.nn.Module, str]:
@@ -216,11 +220,32 @@ def build_model(
             raise ValueError(
                 f"bilstm only supports a local .pth checkpoint, got: {checkpoint!r}"
             )
+    
+    elif model_name == "cwtUNet":
+        model = CWTUNetPhasePicker(
+            in_channels=3,
+            base_channels=16,
+            use_coords=False,
+            coord_channels=2,
+            simple=cwtUNet_simple
+        )
+
+        pipeline_type = "cwtUNet"
+
+        if is_local_file:
+            print(f"Loading cwtUNet weights from {checkpoint} for fine-tuning…")
+            model.load_state_dict(
+                torch.load(checkpoint, map_location="cpu", weights_only=True)
+            )
+        elif checkpoint is not None:
+            raise ValueError(
+                f"cwtUNet only supports a local .pth checkpoint, got: {checkpoint!r}"
+            )
 
     else:
         raise ValueError(
             f"Unknown model: {model_name!r}. "
-            f"Choose 'base_lstm', 'bilstm', 'phasenet', 'eqtransformer', 'unet', or 'unet_det'."
+            f"Choose 'base_lstm', 'bilstm', 'phasenet', 'eqtransformer', 'unet', 'cwtUNet', or 'unet_det'."
         )
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -241,6 +266,8 @@ def build_loaders(
     use_vs30: bool = False,
     use_instrument: bool = False,
     normalize: bool = True,
+    h5_path: str=None,
+    meta_path: str=None,
 ):
     """Build train / val / test DataLoaders from SeisBenchPipelineWrapper."""
     common = dict(
@@ -256,6 +283,16 @@ def build_loaders(
     )
 
     print(f"\nLoading {dataset.upper()} dataset (pipeline={pipeline_type})…")
+
+    if pipeline_type == "cwtUNet":
+        return build_cwt_loaders(
+            h5_path=h5_path,
+            meta_path=meta_path,
+            fraction=fraction,
+            batch_size=batch_size,
+            sigma=sigma,
+            num_workers=16
+        )
     train_pipe = SeisBenchPipelineWrapper(
         split="train",
         dataset_fraction=fraction,
@@ -276,6 +313,50 @@ def build_loaders(
         batch_size=batch_size, num_workers=16, shuffle=False
     )
 
+    return train_loader, val_loader, test_loader
+
+def build_cwt_loaders(
+    h5_path: str,
+    meta_path: str,
+    fraction: float,
+    batch_size: int,
+    sigma: int,
+    max_distance: int,
+    num_workers: int = 16
+):
+    """Build train / val / test DataLoaders from the precomputed CWT HDF5 dataset."""
+    print(f"\nLoading precomputed CWT dataset from {h5_path}…")
+    
+    # 1. Initialize Datasets
+    train_dataset = CWTHDF5Dataset(
+        h5_path=h5_path, meta_path=meta_path, split="train", 
+        fraction=fraction, sigma=sigma, max_distance=max_distance
+    )
+    val_dataset = CWTHDF5Dataset(
+        h5_path=h5_path, meta_path=meta_path, split="dev", 
+        fraction=1.0, sigma=sigma, max_distance=max_distance
+    )
+    test_dataset = CWTHDF5Dataset(
+        h5_path=h5_path, meta_path=meta_path, split="test", 
+        fraction=1.0, sigma=sigma, max_distance=max_distance
+    )
+
+    # 2. Build Loaders
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, num_workers=num_workers, 
+        shuffle=True, pin_memory=True
+    )
+    val_loader = DataLoader(
+        val_dataset, batch_size=batch_size, num_workers=num_workers, 
+        shuffle=False, pin_memory=True
+    )
+    test_loader = DataLoader(
+        test_dataset, batch_size=batch_size, num_workers=num_workers, 
+        shuffle=False, pin_memory=True
+    )
+
+    print(f"Train size: {len(train_dataset)} | Val size: {len(val_dataset)} | Test size: {len(test_dataset)}")
+    
     return train_loader, val_loader, test_loader
 
 
@@ -309,6 +390,7 @@ def main(config):
         max_distance=config["max_distance"],
         oversample=config.get("oversample", False),
         use_coords=config.get("use_coords", False),
+        apply_cwt=config.get("apply_cwt", False),
         use_vs30=config.get("use_vs30", False),
         use_instrument=config.get("use_instrument", False),
         normalize=config.get("normalize", True),
