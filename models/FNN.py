@@ -10,7 +10,7 @@ from scipy.signal import stft
 from scipy.signal import decimate
 from pywt import cwt
 
-from cwt_unet import UNetPhasePicker
+from cwt_unet import CWTUNetPhasePicker
 
 try:
     from dataset.load_dataset import SeisBenchPipelineWrapper
@@ -185,14 +185,14 @@ modelCNN = SeismicPicker_fourier(
     use_coords=False,
     initial_freq_bins=129
 )
-modelUnetSimple = UNetPhasePicker(
+modelUnetSimple = CWTUNetPhasePicker(
     in_channels=3, 
     base_channels=16, 
     use_coords=False, 
     coord_channels=3, 
     simple=True
     )
-modelUnetDouble = UNetPhasePicker(
+modelUnetDouble = CWTUNetPhasePicker(
     in_channels=3, 
     base_channels=16, 
     use_coords=False, 

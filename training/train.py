@@ -11,8 +11,10 @@ from dataset.load_dataset import SeisBenchPipelineWrapper
 from training.training_loop import train
 from analysis.run_evaluation import run_evaluation
 import numpy as np
+from dataset.cwtHDF5dataset import CWTHDF5Dataset
+from torch.utils.data import Dataset, DataLoader
 
-# model : "base_lstm" | "phasenet" | "eqtransformer"
+# model : "base_lstm" | "phasenet" | "eqtransformer" | "cwtUNet"
 # dataset : "stead" | "instance"
 
 
@@ -72,6 +74,7 @@ def build_model(
     base_channels: int = 64,
     lstm_layers: int = 2,
     use_coords: bool = False,
+    cwtUNet_simple: bool = False
 ) -> tuple[torch.nn.Module, str]:
     """
     Return (model, pipeline_model_type).
@@ -199,11 +202,34 @@ def build_model(
             raise ValueError(
                 f"bilstm only supports a local .pth checkpoint, got: {checkpoint!r}"
             )
+    
+    elif model_name == "cwtUNet":
+        from models.cwt_unet import CWTUNetPhasePicker
+
+        model = CWTUNetPhasePicker(
+            in_channels=3,
+            base_channels=16,
+            use_coords=False,
+            coord_channels=2,
+            simple=cwtUNet_simple
+        )
+
+        pipeline_type = "cwtUNet"
+
+        if is_local_file:
+            print(f"Loading cwtUNet weights from {checkpoint} for fine-tuning…")
+            model.load_state_dict(
+                torch.load(checkpoint, map_location="cpu", weights_only=True)
+            )
+        elif checkpoint is not None:
+            raise ValueError(
+                f"cwtUNet only supports a local .pth checkpoint, got: {checkpoint!r}"
+            )
 
     else:
         raise ValueError(
             f"Unknown model: {model_name!r}. "
-            f"Choose 'base_lstm', 'bilstm', 'phasenet', 'eqtransformer', 'unet', or 'unet_det'."
+            f"Choose 'base_lstm', 'bilstm', 'phasenet', 'eqtransformer', 'unet', 'cwtUNet', or 'unet_det'."
         )
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -221,6 +247,7 @@ def build_loaders(
     max_distance: int,
     oversample: bool,
     use_coords: bool = False,
+    apply_cwt: bool = False,
 ):
     """Build train / val / test DataLoaders from SeisBenchPipelineWrapper."""
     common = dict(
@@ -255,6 +282,50 @@ def build_loaders(
 
     return train_loader, val_loader, test_loader
 
+def build_cwt_loaders(
+    h5_path: str,
+    meta_path: str,
+    fraction: float,
+    batch_size: int,
+    sigma: int,
+    max_distance: int,
+    num_workers: int = 16
+):
+    """Build train / val / test DataLoaders from the precomputed CWT HDF5 dataset."""
+    print(f"\nLoading precomputed CWT dataset from {h5_path}…")
+    
+    # 1. Initialize Datasets
+    train_dataset = CWTHDF5Dataset(
+        h5_path=h5_path, meta_path=meta_path, split="train", 
+        fraction=fraction, sigma=sigma, max_distance=max_distance
+    )
+    val_dataset = CWTHDF5Dataset(
+        h5_path=h5_path, meta_path=meta_path, split="dev", 
+        fraction=1.0, sigma=sigma, max_distance=max_distance
+    )
+    test_dataset = CWTHDF5Dataset(
+        h5_path=h5_path, meta_path=meta_path, split="test", 
+        fraction=1.0, sigma=sigma, max_distance=max_distance
+    )
+
+    # 2. Build Loaders
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, num_workers=num_workers, 
+        shuffle=True, pin_memory=True
+    )
+    val_loader = DataLoader(
+        val_dataset, batch_size=batch_size, num_workers=num_workers, 
+        shuffle=False, pin_memory=True
+    )
+    test_loader = DataLoader(
+        test_dataset, batch_size=batch_size, num_workers=num_workers, 
+        shuffle=False, pin_memory=True
+    )
+
+    print(f"Train size: {len(train_dataset)} | Val size: {len(val_dataset)} | Test size: {len(test_dataset)}")
+    
+    return train_loader, val_loader, test_loader
+
 
 # Main
 
@@ -282,6 +353,7 @@ def main(config):
         max_distance=config["max_distance"],
         oversample=config.get("oversample", False),
         use_coords=config.get("use_coords", False),
+        apply_cwt=config.get("apply_cwt", False),
     )
 
     model, metrics = train(

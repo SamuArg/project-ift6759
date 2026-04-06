@@ -71,12 +71,12 @@ class Up(nn.Module):
         x = torch.cat([x2, x1], dim=1)
         return self.conv(x)
 
-class UNetPhasePicker(nn.Module):
+class CWTUNetPhasePicker(nn.Module):
     """
     Lightweight 2D U-Net for CWT spectrograms.
     Returns P and S wave logits at the original temporal resolution.
     """
-    def __init__(self, in_channels=3, base_channels=16, use_coords=False, coord_channels=3, simple=False):
+    def __init__(self, in_channels=3, base_channels=16, use_coords=False, coord_channels=2, simple=False):
         super().__init__()
         self.use_coords = use_coords
         
