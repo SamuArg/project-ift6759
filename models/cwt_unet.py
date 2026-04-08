@@ -2,7 +2,19 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-import torchaudio
+try:
+    import torchaudio
+except (ImportError, RuntimeError, OSError):
+    torchaudio = None
+
+class Resample(nn.Module):
+    def __init__(self, orig_freq, new_freq):
+        super().__init__()
+        self.scale_factor = new_freq / orig_freq
+
+    def forward(self, x):
+        # x shape: (B, C, T)
+        return F.interpolate(x, scale_factor=self.scale_factor, mode='linear', align_corners=False)
 
 class CWTBlock(nn.Module):
     def __init__(self, sf=50.0, num_bins=32, f_min=1.0, f_max=45.0, B=1.5, C=1.0):
@@ -150,7 +162,13 @@ class CWTUNetPhasePicker(nn.Module):
         # --- CWT block ---
         self.cwt_onTheFly = cwt_onTheFly
         if cwt_onTheFly:
-            self.resampler = torchaudio.transforms.Resample(orig_freq=100, new_freq=50)
+            if torchaudio is not None:
+                try:
+                    self.resampler = torchaudio.transforms.Resample(orig_freq=100, new_freq=50)
+                except (RuntimeError, OSError):
+                     self.resampler = Resample(orig_freq=100.0, new_freq=50.0)
+            else:
+                self.resampler = Resample(orig_freq=100.0, new_freq=50.0)
             self.cwtBlock = CWTBlock()
         
         # --- Encoder (Downsampling) ---
@@ -181,12 +199,13 @@ class CWTUNetPhasePicker(nn.Module):
 
 
     def forward(self, x: torch.Tensor, coords: torch.Tensor = None):
-        # x shape: (B, 3, F, T) -> e.g., (Batch, 3, 128, 12000)
+        # x shape: (B, 3, T)
+        original_len = x.shape[2]
         
         # --- CWT pass ---
         if self.cwt_onTheFly:
             x = self.resampler(x)
-            x = self.cwtBlock
+            x = self.cwtBlock(x)
             x = torch.log1p(x)
         # --- Encoder pass ---
         x1 = self.inc(x)       # Skip 1
@@ -220,6 +239,11 @@ class CWTUNetPhasePicker(nn.Module):
         # Shape goes from (B, C, T) -> (B, 1, T) -> (B, T)
         logit_p = self.head_p(x).squeeze(1)
         logit_s = self.head_s(x).squeeze(1)
+
+        # --- Rescale to original length if needed ---
+        if logit_p.shape[1] != original_len:
+            logit_p = F.interpolate(logit_p.unsqueeze(1), size=original_len, mode='linear', align_corners=False).squeeze(1)
+            logit_s = F.interpolate(logit_s.unsqueeze(1), size=original_len, mode='linear', align_corners=False).squeeze(1)
         
         return logit_p, logit_s
 

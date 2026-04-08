@@ -19,34 +19,40 @@ from models.cwt_unet import CWTUNetPhasePicker
 # dataset : "stead" | "instance"
 
 
-configs = []
-use_vs30 = True
-use_coords = False
-for dataset in ["instance"]:
-    for lstm_hidden in [64, 128]:
-        coords_str = "coords" if use_coords else "nocoords"
-        vs30_str = "vs30" if use_vs30 else "novs30"
-        configs.append(
-            {
-                "model": "base_lstm",
-                "dataset": dataset,
-                "checkpoint": None,
-                "fraction": 1.0,
-                "n_epochs": 10,
-                "model_name": f"base_lstm_{dataset}_h{lstm_hidden}_{coords_str}_{vs30_str}",
-                "batch_size": 64,
-                "learning_rate": 1e-3,
-                "sigma": 10,
-                "type_label": "gaussian",
-                "max_distance": 100,
-                "lstm_hidden": lstm_hidden,
-                "lstm_layers": 2,
-                "dropout": 0.2,
-                "use_coords": use_coords,
-                "use_vs30": use_vs30,
-                "use_instrument": False,
-            }
-        )
+configs = [
+    {
+        "model": "cwtUNet",
+        "dataset": "instance",
+        "checkpoint": None,
+        "fraction": 1.0,
+        "n_epochs": 10,
+        "model_name": "cwt_instance_onthefly",
+        "batch_size": 32,
+        "learning_rate": 1e-3,
+        "sigma": 10,
+        "type_label": "gaussian",
+        "max_distance": 100,
+        "use_coords": False,
+        "use_vs30": False,
+        "cwt_onTheFly": True,
+    },
+    {
+        "model": "cwtUNet",
+        "dataset": "stead",
+        "checkpoint": None,
+        "fraction": 1.0,
+        "n_epochs": 10,
+        "model_name": "cwt_stead_onthefly",
+        "batch_size": 32,
+        "learning_rate": 1e-3,
+        "sigma": 10,
+        "type_label": "gaussian",
+        "max_distance": 100,
+        "use_coords": False,
+        "use_vs30": False,
+        "cwt_onTheFly": True,
+    }
+]
 
 LOGDIR = "test_outputs/logs"
 FIGDIR = "test_outputs/figures"
@@ -380,6 +386,7 @@ def main(config):
         use_coords=config.get("use_coords", False),
         use_vs30=config.get("use_vs30", False),
         use_instrument=config.get("use_instrument", False),
+        cwt_onTheFly=config.get("cwt_onTheFly", True),
     )
     # Allow config to override the pipeline type (window size) independently of model
     loader_pipeline_type = config.get("pipeline_type_override", pipeline_type)
@@ -393,10 +400,10 @@ def main(config):
         max_distance=config["max_distance"],
         oversample=config.get("oversample", False),
         use_coords=config.get("use_coords", False),
-        apply_cwt=config.get("apply_cwt", False),
         use_vs30=config.get("use_vs30", False),
         use_instrument=config.get("use_instrument", False),
         normalize=config.get("normalize", True),
+        cwt_onTheFly=config.get("cwt_onTheFly", True),
     )
 
     model, metrics = train(

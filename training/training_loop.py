@@ -189,14 +189,7 @@ def run_epoch(
                     call_kwargs["instrument"] = instrument
  
                 outputs = model(waveform, **call_kwargs)
-                if getattr(model, "cwt_onTheFly", False):
-                    # prend la moitié des labels pour matcher le sample rate du output du modèle
-                    y_p_target = F.max_pool1d(label_p.unsqueeze(1), kernel_size=2, stride=2).squeeze(1)
-                    y_s_target = F.max_pool1d(label_s.unsqueeze(1), kernel_size=2, stride=2).squeeze(1)
-                    y_det_target = F.max_pool1d(label_det.unsqueeze(1), kernel_size=2, stride=2).squeeze(1)
-                    loss = loss_fn(outputs, y_p_target, y_s_target, y_det_target)
-                else:
-                    loss = loss_fn(outputs, label_p, label_s, label_det)
+                loss = loss_fn(outputs, label_p, label_s, label_det)
 
             if is_training:
                 scaler.scale(loss).backward()
