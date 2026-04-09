@@ -182,27 +182,32 @@ if __name__ == "__main__":
  
     # Runs originaux (inchangés, VS30 et instrument désactivés par défaut)
 
-    train_magnitude(
-        dataset_name="INSTANCE",
-        epochs=50,
-        fraction=1,
-        model_name="mag_predictor_instance_100_coords",
-        window_len=100,
-        use_coords=True,
-    )
-    train_magnitude(
-        dataset_name="INSTANCE",
-        epochs=50,
-        fraction=1,
-        model_name="mag_predictor_instance_50_coords",
-        window_len=50,
-        use_coords=True,
-    )
-    train_magnitude(
-        dataset_name="INSTANCE",
-        epochs=50,
-        fraction=1,
-        model_name="mag_predictor_instance_25_coords",
-        window_len=25,
-        use_coords=True,
-    )
+    configs = []
+
+    for window_len in [200, 100, 50, 25]:
+        for dataset in ["instance", "stead"]:
+            for use_coords in [True, False]:
+                for use_vs30 in [True, False]:
+                    if use_vs30 and dataset == "stead":
+                        continue
+                    for use_instrument in [True, False]:
+                        configs.append({
+                            "dataset_name": dataset,
+                            "window_len": window_len,
+                            "use_coords": use_coords,
+                            "use_vs30": use_vs30,
+                            "use_instrument": use_instrument,
+                        })
+    
+    for config in tqdm(configs, desc="Training models"):
+        train_magnitude(
+            dataset_name=config["dataset_name"],
+            epochs=15,
+            fraction=1,
+            model_name=f"mag_{config['dataset_name']}_{config['window_len']}_{'coords' if config['use_coords'] else ''}_{'vs30' if config['use_vs30'] else ''}_{'instrument' if config['use_instrument'] else ''}",
+            window_len=config["window_len"],
+            use_coords=config["use_coords"],
+            use_vs30=config["use_vs30"],
+            use_instrument=config["use_instrument"],
+        )
+        

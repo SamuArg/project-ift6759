@@ -17,49 +17,58 @@ from models.magnitude_model import MagnitudePredictor
 def evaluate_magnitude_model(
     model_path,
     dataset_name="INSTANCE",
-    batch_size=128,
-    fraction=1.0,
+    batch_size=512,
     window_len=200,
     use_coords=False,
+    use_vs30=False,
+    use_instrument=False,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Loading model from {model_path} onto {device}...")
+    
+    if not os.path.exists(model_path):
+        # Silently skip missing models
+        return None
 
-    model = MagnitudePredictor(use_coords=use_coords).to(device)
-    if os.path.exists(model_path):
-        model.load_state_dict(torch.load(model_path, map_location=device))
-    else:
-        print(f"Warning: {model_path} not found. Using randomly initialized model.")
-
+    print(f"\nEvaluating: {os.path.basename(model_path)}")
+    model = MagnitudePredictor(
+        use_coords=use_coords,
+        use_vs30=use_vs30,
+        use_instrument=use_instrument,
+    ).to(device)
+    
+    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
     model.eval()
 
     # We only need the test loader
     _, _, test_loader = build_loaders_magnitude(
         dataset_name=dataset_name,
-        fraction=fraction,
         batch_size=batch_size,
         window_len=window_len,
         use_coords=use_coords,
+        use_vs30=use_vs30,
+        use_instrument=use_instrument,
     )
 
     all_preds = []
     all_targets = []
-
     criterion = nn.MSELoss()
     total_loss = 0.0
     total_mae = 0.0
 
-    print("Evaluating on test set...")
     for batch in test_loader:
-        if len(batch) == 3:
-            x, coords, y = batch
-            coords = coords.to(device)
-        else:
-            x, y = batch
-            coords = None
+        # Dictionary unpacking (compatible with MagnitudeDataset)
+        x = batch["waveform"].to(device)
+        y = batch["magnitude"].to(device)
+        
+        call_kwargs = {}
+        if "coords" in batch and use_coords:
+            call_kwargs["coords"] = batch["coords"].to(device)
+        if "vs30" in batch and use_vs30:
+            call_kwargs["vs30"] = batch["vs30"].to(device)
+        if "instrument" in batch and use_instrument:
+            call_kwargs["instrument"] = batch["instrument"].to(device)
 
-        x, y = x.to(device), y.to(device)
-        preds = model(x, coords=coords)
+        preds = model(x, **call_kwargs)
 
         loss = criterion(preds, y)
         total_loss += loss.item() * x.size(0)
@@ -71,58 +80,57 @@ def evaluate_magnitude_model(
     n_samples = len(test_loader.dataset)
     test_mse = total_loss / n_samples
     test_mae = total_mae / n_samples
-    test_rmse = np.sqrt(test_mse)
-
+    
     all_preds_cat = np.concatenate(all_preds).flatten()
     all_targets_cat = np.concatenate(all_targets).flatten()
     r2 = r2_score(all_targets_cat, all_preds_cat)
 
-    print(f"\n--- Magnitude Prediction Test Results ---")
-    print(f"Samples Evaluated: {n_samples}")
-    print(f"Mean Squared Error (MSE): {test_mse:.4f}")
-    print(f"Mean Absolute Error (MAE): {test_mae:.4f}")
-    print(f"Root Mean Squared Error (RMSE): {test_rmse:.4f}")
-    print(f"R-squared (R2): {r2:.4f}")
-
-    # Plotting
-    os.makedirs(os.path.join("test_outputs", "figures"), exist_ok=True)
-    plot_path = os.path.join("test_outputs", "figures", "magnitude_scatter.png")
-
-    plt.figure(figsize=(8, 8))
-    plt.scatter(all_targets_cat, all_preds_cat, alpha=0.3, s=10)
-    plt.plot(
-        [all_targets_cat.min(), all_targets_cat.max()],
-        [all_targets_cat.min(), all_targets_cat.max()],
-        "r--",
-        lw=2,
-        label="Ideal",
-    )
-    plt.xlabel("True Magnitude")
-    plt.ylabel("Predicted Magnitude")
-    plt.title(f"True vs Predicted Magnitude\nMAE: {test_mae:.2f} | R²: {r2:.2f}")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(plot_path, dpi=200)
-    print(f"Scatter plot saved to {plot_path}")
+    print(f"  MSE: {test_mse:.4f} | MAE: {test_mae:.4f} | R2: {r2:.4f}")
+    
+    return {
+        "model": os.path.basename(model_path),
+        "MSE": test_mse,
+        "MAE": test_mae,
+        "R2": r2
+    }
 
 
 if __name__ == "__main__":
-    # Test evaluation
-    datasets = ["INSTANCE", "STEAD"]
-    input_sizes = [25, 50, 100, 200]
-    for dataset in datasets:
-        for size in input_sizes:
-            print(f"Testing {dataset} with input size {size}")
-            model_path = os.path.join(
-                "test_outputs",
-                "models",
-                f"mag_predictor_{dataset.lower()}_{size}_coords.pth",
-            )
-            evaluate_magnitude_model(
-                model_path,
-                dataset_name=dataset,
-                fraction=1,
-                window_len=size,
-                use_coords=True,
-            )
+    configs = []
+    for window_len in [200, 100, 50, 25]:
+        for dataset in ["instance", "stead"]:
+            for use_coords in [True, False]:
+                for use_vs30 in [True, False]:
+                    if use_vs30 and dataset == "stead":
+                        continue
+                    for use_instrument in [True, False]:
+                        model_name = f"mag_{dataset}_{window_len}_{'coords' if use_coords else ''}_{'vs30' if use_vs30 else ''}_{'instrument' if use_instrument else ''}"
+                        configs.append({
+                            "dataset_name": dataset,
+                            "window_len": window_len,
+                            "use_coords": use_coords,
+                            "use_vs30": use_vs30,
+                            "use_instrument": use_instrument,
+                            "model_name": model_name
+                        })
+
+    results = []
+    for config in configs:
+        model_path = os.path.join("test_outputs", "models", f"{config['model_name']}.pth")
+        res = evaluate_magnitude_model(
+            model_path,
+            dataset_name=config["dataset_name"],
+            window_len=config["window_len"],
+            use_coords=config["use_coords"],
+            use_vs30=config["use_vs30"],
+            use_instrument=config["use_instrument"],
+        )
+        if res:
+            results.append(res)
+            
+    if results:
+        import pandas as pd
+        df = pd.DataFrame(results)
+        print("\n=== Summary Table ===")
+        print(df.to_string(index=False))
+        df.to_csv("magnitude_final_results.csv", index=False)
