@@ -89,6 +89,7 @@ def build_model(
     cwt_onTheFly: bool = True,
     use_vs30: bool = False,
     use_instrument: bool = False,
+    to_frequency_domain: bool = False,
 ) -> tuple[torch.nn.Module, str]:
     """
     Return (model, pipeline_model_type).
@@ -248,6 +249,39 @@ def build_model(
         elif checkpoint is not None:
             raise ValueError(
                 f"cwtUNet only supports a local .pth checkpoint, got: {checkpoint!r}"
+            )
+    
+    elif model_name == 'cwt_base_lstm':
+        
+        model = SeismicPicker( # CHANGE
+            in_channels=3,
+            base_channels=base_channels,
+            lstm_hidden=lstm_hidden,
+            lstm_layers=lstm_layers,
+            dropout=dropout,
+            use_coords=use_coords,
+            use_vs30=use_vs30,
+            use_instrument=use_instrument,
+        )
+        # Log récapitulatif des features activées
+        active = [f for f, flag in [
+            ("coords", use_coords),
+            ("vs30", use_vs30),
+            ("instrument", use_instrument)
+        ] if flag]
+        if active:
+            print(f"  Features contextuelles actives : {', '.join(active)}")
+
+        pipeline_type = "eqtransformer"  # 6000-sample window for this model
+
+        if is_local_file:
+            print(f"Loading base_lstm weights from {checkpoint} for fine-tuning…")
+            model.load_state_dict(
+                torch.load(checkpoint, map_location="cpu", weights_only=True)
+            )
+        elif checkpoint is not None:
+            raise ValueError(
+                f"base_lstm only supports a local .pth checkpoint, got: {checkpoint!r}"
             )
 
     else:
