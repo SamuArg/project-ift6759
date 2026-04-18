@@ -51,7 +51,7 @@ configs = [
         "use_coords": False,
         "use_vs30": False,
         "cwt_onTheFly": True,
-    }
+    },
 ]
 
 LOGDIR = "test_outputs/logs"
@@ -110,11 +110,15 @@ def build_model(
             use_instrument=use_instrument,
         )
         # Log récapitulatif des features activées
-        active = [f for f, flag in [
-            ("coords", use_coords),
-            ("vs30", use_vs30),
-            ("instrument", use_instrument)
-        ] if flag]
+        active = [
+            f
+            for f, flag in [
+                ("coords", use_coords),
+                ("vs30", use_vs30),
+                ("instrument", use_instrument),
+            ]
+            if flag
+        ]
         if active:
             print(f"  Features contextuelles actives : {', '.join(active)}")
 
@@ -228,7 +232,7 @@ def build_model(
             raise ValueError(
                 f"bilstm only supports a local .pth checkpoint, got: {checkpoint!r}"
             )
-    
+
     elif model_name == "cwtUNet":
         model = CWTUNetPhasePicker(
             in_channels=3,
@@ -236,7 +240,7 @@ def build_model(
             use_coords=False,
             coord_channels=2,
             simple=cwtUNet_simple,
-            cwt_onTheFly=cwt_onTheFly
+            cwt_onTheFly=cwt_onTheFly,
         )
 
         pipeline_type = "cwtUNet"
@@ -250,10 +254,10 @@ def build_model(
             raise ValueError(
                 f"cwtUNet only supports a local .pth checkpoint, got: {checkpoint!r}"
             )
-    
-    elif model_name == 'cwt_base_lstm':
-        
-        model = SeismicPicker( # CHANGE
+
+    elif model_name == "cwt_base_lstm":
+
+        model = SeismicPicker(  # CHANGE
             in_channels=3,
             base_channels=base_channels,
             lstm_hidden=lstm_hidden,
@@ -264,11 +268,15 @@ def build_model(
             use_instrument=use_instrument,
         )
         # Log récapitulatif des features activées
-        active = [f for f, flag in [
-            ("coords", use_coords),
-            ("vs30", use_vs30),
-            ("instrument", use_instrument)
-        ] if flag]
+        active = [
+            f
+            for f, flag in [
+                ("coords", use_coords),
+                ("vs30", use_vs30),
+                ("instrument", use_instrument),
+            ]
+            if flag
+        ]
         if active:
             print(f"  Features contextuelles actives : {', '.join(active)}")
 
@@ -308,9 +316,9 @@ def build_loaders(
     use_vs30: bool = False,
     use_instrument: bool = False,
     normalize: bool = True,
-    h5_path: str=None,
-    meta_path: str=None,
-    cwt_onTheFly: bool=True,
+    h5_path: str = None,
+    meta_path: str = None,
+    cwt_onTheFly: bool = True,
 ):
     """Build train / val / test DataLoaders from SeisBenchPipelineWrapper."""
     common = dict(
@@ -334,7 +342,7 @@ def build_loaders(
             fraction=fraction,
             batch_size=batch_size,
             sigma=sigma,
-            num_workers=16
+            num_workers=16,
         )
     train_pipe = SeisBenchPipelineWrapper(
         split="train",
@@ -358,6 +366,7 @@ def build_loaders(
 
     return train_loader, val_loader, test_loader
 
+
 def build_cwt_loaders(
     h5_path: str,
     meta_path: str,
@@ -365,41 +374,64 @@ def build_cwt_loaders(
     batch_size: int,
     sigma: int,
     max_distance: int,
-    num_workers: int = 16
+    num_workers: int = 16,
 ):
     """Build train / val / test DataLoaders from the precomputed CWT HDF5 dataset."""
     print(f"\nLoading precomputed CWT dataset from {h5_path}…")
-    
+
     # 1. Initialize Datasets
     train_dataset = CWTHDF5Dataset(
-        h5_path=h5_path, meta_path=meta_path, split="train", 
-        fraction=fraction, sigma=sigma, max_distance=max_distance
+        h5_path=h5_path,
+        meta_path=meta_path,
+        split="train",
+        fraction=fraction,
+        sigma=sigma,
+        max_distance=max_distance,
     )
     val_dataset = CWTHDF5Dataset(
-        h5_path=h5_path, meta_path=meta_path, split="dev", 
-        fraction=1.0, sigma=sigma, max_distance=max_distance
+        h5_path=h5_path,
+        meta_path=meta_path,
+        split="dev",
+        fraction=1.0,
+        sigma=sigma,
+        max_distance=max_distance,
     )
     test_dataset = CWTHDF5Dataset(
-        h5_path=h5_path, meta_path=meta_path, split="test", 
-        fraction=1.0, sigma=sigma, max_distance=max_distance
+        h5_path=h5_path,
+        meta_path=meta_path,
+        split="test",
+        fraction=1.0,
+        sigma=sigma,
+        max_distance=max_distance,
     )
 
     # 2. Build Loaders
     train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, num_workers=num_workers, 
-        shuffle=True, pin_memory=True
+        train_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=True,
+        pin_memory=True,
     )
     val_loader = DataLoader(
-        val_dataset, batch_size=batch_size, num_workers=num_workers, 
-        shuffle=False, pin_memory=True
+        val_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=False,
+        pin_memory=True,
     )
     test_loader = DataLoader(
-        test_dataset, batch_size=batch_size, num_workers=num_workers, 
-        shuffle=False, pin_memory=True
+        test_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=False,
+        pin_memory=True,
     )
 
-    print(f"Train size: {len(train_dataset)} | Val size: {len(val_dataset)} | Test size: {len(test_dataset)}")
-    
+    print(
+        f"Train size: {len(train_dataset)} | Val size: {len(val_dataset)} | Test size: {len(test_dataset)}"
+    )
+
     return train_loader, val_loader, test_loader
 
 

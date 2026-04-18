@@ -18,42 +18,46 @@ import os
 import json
 import numpy as np
 import matplotlib
+
 matplotlib.use("Agg")  # backend sans interface graphique (compatible serveur)
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 
 # ── Configuration ─────────────────────────────────────────────────────────
 RESULTS_JSON = "transfer_study/results/transfer_results.json"
-FIGDIR       = "transfer_study/results/figures"
+FIGDIR = "transfer_study/results/figures"
 
 # Style général des figures
-plt.rcParams.update({
-    "font.size":       11,
-    "axes.titlesize":  12,
-    "axes.labelsize":  11,
-    "legend.fontsize":  9,
-    "figure.dpi":      150,
-})
+plt.rcParams.update(
+    {
+        "font.size": 11,
+        "axes.titlesize": 12,
+        "axes.labelsize": 11,
+        "legend.fontsize": 9,
+        "figure.dpi": 150,
+    }
+)
 
 # Couleurs constantes pour chaque "ligne" de modèle
 COLORS = {
-    "base_lstm_stead":       "tab:blue",
-    "eqtransformer_stead":   "tab:green",
-    "phasenet_instance":     "black",
-    "partial":               "tab:orange",
-    "full":                  "tab:red",
+    "base_lstm_stead": "tab:blue",
+    "eqtransformer_stead": "tab:green",
+    "phasenet_instance": "black",
+    "partial": "tab:orange",
+    "full": "tab:red",
 }
 MARKERS = {"partial": "o", "full": "s"}
 LINESTYLES = {
-    "base_lstm_stead":     ":",
+    "base_lstm_stead": ":",
     "eqtransformer_stead": ":",
-    "phasenet_instance":   "--",
+    "phasenet_instance": "--",
 }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  Helpers
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def load_results(path: str) -> dict:
     """Charge le JSON de résultats."""
@@ -81,7 +85,7 @@ def get_finetune_curve(ft: dict, strategy: str, metric_key: str):
         return np.array([]), np.array([])
     items = sorted(ft[strategy].items(), key=lambda kv: float(kv[0]))
     xs = np.array([float(k) * 100 for k, _ in items])
-    ys = np.array([m(v, metric_key)  for _, v in items])
+    ys = np.array([m(v, metric_key) for _, v in items])
     return xs, ys
 
 
@@ -97,6 +101,7 @@ def _save_fig(fig, name: str) -> None:
 # ═══════════════════════════════════════════════════════════════════════════
 #  Figure 1 : Courbes F1 vs % données INSTANCE
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def plot_f1_curves(results: dict) -> None:
     """
@@ -127,38 +132,44 @@ def plot_f1_curves(results: dict) -> None:
         key = f"f1_{phase}_wave"
 
         # Références zero-shot (lignes horizontales)
-        zs_base = m(results["zero_shot"]["base_lstm_stead"],      key)
-        zs_eqt  = m(results["zero_shot"]["eqtransformer_stead"],  key)
-        gs_pn   = m(results["gold_standard"]["phasenet_instance"], key)
+        zs_base = m(results["zero_shot"]["base_lstm_stead"], key)
+        zs_eqt = m(results["zero_shot"]["eqtransformer_stead"], key)
+        gs_pn = m(results["gold_standard"]["phasenet_instance"], key)
 
         ax.axhline(
-            zs_base, color=COLORS["base_lstm_stead"],
-            linestyle=LINESTYLES["base_lstm_stead"], linewidth=1.8,
+            zs_base,
+            color=COLORS["base_lstm_stead"],
+            linestyle=LINESTYLES["base_lstm_stead"],
+            linewidth=1.8,
             label=f"base_lstm zero-shot ({zs_base:.3f})",
         )
         ax.axhline(
-            zs_eqt, color=COLORS["eqtransformer_stead"],
-            linestyle=LINESTYLES["eqtransformer_stead"], linewidth=1.8,
+            zs_eqt,
+            color=COLORS["eqtransformer_stead"],
+            linestyle=LINESTYLES["eqtransformer_stead"],
+            linewidth=1.8,
             label=f"EQTransformer zero-shot ({zs_eqt:.3f})",
         )
         ax.axhline(
-            gs_pn, color=COLORS["phasenet_instance"],
-            linestyle=LINESTYLES["phasenet_instance"], linewidth=2.2,
+            gs_pn,
+            color=COLORS["phasenet_instance"],
+            linestyle=LINESTYLES["phasenet_instance"],
+            linewidth=2.2,
             label=f"PhaseNet gold standard ({gs_pn:.3f})",
         )
 
         # Courbes de fine-tuning
         for strategy in ["partial", "full"]:
-            xs, ys = get_finetune_curve(
-                results.get("fine_tuning", {}), strategy, key
-            )
+            xs, ys = get_finetune_curve(results.get("fine_tuning", {}), strategy, key)
             if len(xs) == 0:
                 continue
             ax.plot(
-                xs, ys,
+                xs,
+                ys,
                 color=COLORS[strategy],
                 marker=MARKERS[strategy],
-                linewidth=2, markersize=7,
+                linewidth=2,
+                markersize=7,
                 label=f"Fine-tune [{strategy}]",
             )
 
@@ -177,6 +188,7 @@ def plot_f1_curves(results: dict) -> None:
 # ═══════════════════════════════════════════════════════════════════════════
 #  Figure 2 : Courbes MAE vs % données INSTANCE
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def plot_mae_curves(results: dict) -> None:
     """
@@ -199,37 +211,43 @@ def plot_mae_curves(results: dict) -> None:
     for ax, phase in zip(axes, ["p", "s"]):
         key = f"mae_{phase}_wave"
 
-        zs_base = m(results["zero_shot"]["base_lstm_stead"],      key)
-        zs_eqt  = m(results["zero_shot"]["eqtransformer_stead"],  key)
-        gs_pn   = m(results["gold_standard"]["phasenet_instance"], key)
+        zs_base = m(results["zero_shot"]["base_lstm_stead"], key)
+        zs_eqt = m(results["zero_shot"]["eqtransformer_stead"], key)
+        gs_pn = m(results["gold_standard"]["phasenet_instance"], key)
 
         ax.axhline(
-            zs_base, color=COLORS["base_lstm_stead"],
-            linestyle=LINESTYLES["base_lstm_stead"], linewidth=1.8,
+            zs_base,
+            color=COLORS["base_lstm_stead"],
+            linestyle=LINESTYLES["base_lstm_stead"],
+            linewidth=1.8,
             label=f"base_lstm zero-shot ({zs_base:.4f}s)",
         )
         ax.axhline(
-            zs_eqt, color=COLORS["eqtransformer_stead"],
-            linestyle=LINESTYLES["eqtransformer_stead"], linewidth=1.8,
+            zs_eqt,
+            color=COLORS["eqtransformer_stead"],
+            linestyle=LINESTYLES["eqtransformer_stead"],
+            linewidth=1.8,
             label=f"EQTransformer zero-shot ({zs_eqt:.4f}s)",
         )
         ax.axhline(
-            gs_pn, color=COLORS["phasenet_instance"],
-            linestyle=LINESTYLES["phasenet_instance"], linewidth=2.2,
+            gs_pn,
+            color=COLORS["phasenet_instance"],
+            linestyle=LINESTYLES["phasenet_instance"],
+            linewidth=2.2,
             label=f"PhaseNet gold standard ({gs_pn:.4f}s)",
         )
 
         for strategy in ["partial", "full"]:
-            xs, ys = get_finetune_curve(
-                results.get("fine_tuning", {}), strategy, key
-            )
+            xs, ys = get_finetune_curve(results.get("fine_tuning", {}), strategy, key)
             if len(xs) == 0:
                 continue
             ax.plot(
-                xs, ys,
+                xs,
+                ys,
                 color=COLORS[strategy],
                 marker=MARKERS[strategy],
-                linewidth=2, markersize=7,
+                linewidth=2,
+                markersize=7,
                 label=f"Fine-tune [{strategy}]",
             )
 
@@ -249,6 +267,7 @@ def plot_mae_curves(results: dict) -> None:
 #  Figure 3 : Comparaison zero-shot en barres
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def plot_zeroshot_comparison(results: dict) -> None:
     """
     Graphe en barres comparant les deux modèles zero-shot sur 4 métriques,
@@ -257,13 +276,13 @@ def plot_zeroshot_comparison(results: dict) -> None:
     Ce graphe répond à : "Notre base_lstm zero-shot est-il meilleur ou moins
     bon qu'EQTransformer zero-shot sur les données italiennes ?"
     """
-    model_keys   = ["base_lstm_stead", "eqtransformer_stead"]
+    model_keys = ["base_lstm_stead", "eqtransformer_stead"]
     model_labels = ["base_lstm\n(zero-shot)", "EQTransformer\n(zero-shot)"]
-    bar_colors   = [COLORS["base_lstm_stead"], COLORS["eqtransformer_stead"]]
+    bar_colors = [COLORS["base_lstm_stead"], COLORS["eqtransformer_stead"]]
 
     metrics_list = [
-        ("f1_p_wave",  "F1 — Onde P"),
-        ("f1_s_wave",  "F1 — Onde S"),
+        ("f1_p_wave", "F1 — Onde P"),
+        ("f1_s_wave", "F1 — Onde S"),
         ("mae_p_wave", "MAE Onde P (s)"),
         ("mae_s_wave", "MAE Onde S (s)"),
     ]
@@ -275,17 +294,22 @@ def plot_zeroshot_comparison(results: dict) -> None:
     )
 
     for ax, (metric_key, title) in zip(axes, metrics_list):
-        values = [
-            m(results["zero_shot"][k], metric_key) for k in model_keys
-        ]
+        values = [m(results["zero_shot"][k], metric_key) for k in model_keys]
         gold = m(results["gold_standard"]["phasenet_instance"], metric_key)
 
         bars = ax.bar(
-            model_labels, values,
-            color=bar_colors, alpha=0.80, edgecolor="black", linewidth=0.8,
+            model_labels,
+            values,
+            color=bar_colors,
+            alpha=0.80,
+            edgecolor="black",
+            linewidth=0.8,
         )
         ax.axhline(
-            gold, color="black", linestyle="--", linewidth=2.0,
+            gold,
+            color="black",
+            linestyle="--",
+            linewidth=2.0,
             label=f"PhaseNet gold ({gold:.4f})",
         )
 
@@ -296,7 +320,9 @@ def plot_zeroshot_comparison(results: dict) -> None:
                     bar.get_x() + bar.get_width() / 2,
                     val + 0.003,
                     f"{val:.3f}",
-                    ha="center", va="bottom", fontsize=9,
+                    ha="center",
+                    va="bottom",
+                    fontsize=9,
                 )
 
         ax.set_title(title)
@@ -311,6 +337,7 @@ def plot_zeroshot_comparison(results: dict) -> None:
 # ═══════════════════════════════════════════════════════════════════════════
 #  Figure 4 : Heatmap stratégie × fraction
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def plot_strategy_heatmap(results: dict) -> None:
     """
@@ -327,9 +354,7 @@ def plot_strategy_heatmap(results: dict) -> None:
         return
 
     # Extraire les fractions communes
-    all_fracs = sorted(
-        set(float(k) for s in strategies for k in ft[s].keys())
-    )
+    all_fracs = sorted(set(float(k) for s in strategies for k in ft[s].keys()))
     frac_labels = [f"{f * 100:.0f}%" for f in all_fracs]
 
     data = np.full((len(strategies), len(all_fracs)), np.nan)
@@ -362,9 +387,13 @@ def plot_strategy_heatmap(results: dict) -> None:
             val = data[i, j]
             if not np.isnan(val):
                 ax.text(
-                    j, i, f"{val:.3f}",
-                    ha="center", va="center",
-                    fontsize=10, fontweight="bold",
+                    j,
+                    i,
+                    f"{val:.3f}",
+                    ha="center",
+                    va="center",
+                    fontsize=10,
+                    fontweight="bold",
                     color="black" if 0.3 < val < 0.85 else "white",
                 )
 
@@ -375,6 +404,7 @@ def plot_strategy_heatmap(results: dict) -> None:
 # ═══════════════════════════════════════════════════════════════════════════
 #  Tableau récapitulatif (console)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def print_summary_table(results: dict) -> None:
     """
@@ -393,8 +423,12 @@ def print_summary_table(results: dict) -> None:
     SEP = "─" * (len(HDR) + 2)
 
     def _row(label, d):
-        def _f(k): return f"{m(d, k):{FMT_F}}" if not np.isnan(m(d, k)) else f"{'N/A':>9}"
-        def _fs(k): return f"{m(d, k):{FMT_S}}" if not np.isnan(m(d, k)) else f"{'N/A':>10}"
+        def _f(k):
+            return f"{m(d, k):{FMT_F}}" if not np.isnan(m(d, k)) else f"{'N/A':>9}"
+
+        def _fs(k):
+            return f"{m(d, k):{FMT_S}}" if not np.isnan(m(d, k)) else f"{'N/A':>10}"
+
         print(
             f"  {label:<{COL}} "
             f"{_f('f1_p_wave')} {_f('f1_s_wave')} "
@@ -410,8 +444,10 @@ def print_summary_table(results: dict) -> None:
     print(SEP)
 
     # Zero-shot
-    _row("base_lstm (STEAD, zero-shot)",       results["zero_shot"]["base_lstm_stead"])
-    _row("EQTransformer (STEAD, zero-shot)",   results["zero_shot"]["eqtransformer_stead"])
+    _row("base_lstm (STEAD, zero-shot)", results["zero_shot"]["base_lstm_stead"])
+    _row(
+        "EQTransformer (STEAD, zero-shot)", results["zero_shot"]["eqtransformer_stead"]
+    )
     print(SEP)
 
     # Fine-tuning
@@ -425,13 +461,17 @@ def print_summary_table(results: dict) -> None:
         print(SEP)
 
     # Gold standard
-    _row("PhaseNet (INSTANCE, gold standard)", results["gold_standard"]["phasenet_instance"])
+    _row(
+        "PhaseNet (INSTANCE, gold standard)",
+        results["gold_standard"]["phasenet_instance"],
+    )
     print("═" * (len(HDR) + 2))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  MAIN
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def main():
     print(f"Chargement des résultats depuis {RESULTS_JSON!r}…")

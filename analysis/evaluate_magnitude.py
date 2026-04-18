@@ -24,7 +24,7 @@ def evaluate_magnitude_model(
     use_instrument=False,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+
     if not os.path.exists(model_path):
         # Silently skip missing models
         return None
@@ -35,8 +35,10 @@ def evaluate_magnitude_model(
         use_vs30=use_vs30,
         use_instrument=use_instrument,
     ).to(device)
-    
-    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
+
+    model.load_state_dict(
+        torch.load(model_path, map_location=device, weights_only=True)
+    )
     model.eval()
 
     # We only need the test loader
@@ -59,7 +61,7 @@ def evaluate_magnitude_model(
         # Dictionary unpacking (compatible with MagnitudeDataset)
         x = batch["waveform"].to(device)
         y = batch["magnitude"].to(device)
-        
+
         call_kwargs = {}
         if "coords" in batch and use_coords:
             call_kwargs["coords"] = batch["coords"].to(device)
@@ -80,18 +82,18 @@ def evaluate_magnitude_model(
     n_samples = len(test_loader.dataset)
     test_mse = total_loss / n_samples
     test_mae = total_mae / n_samples
-    
+
     all_preds_cat = np.concatenate(all_preds).flatten()
     all_targets_cat = np.concatenate(all_targets).flatten()
     r2 = r2_score(all_targets_cat, all_preds_cat)
 
     print(f"  MSE: {test_mse:.4f} | MAE: {test_mae:.4f} | R2: {r2:.4f}")
-    
+
     return {
         "model": os.path.basename(model_path),
         "MSE": test_mse,
         "MAE": test_mae,
-        "R2": r2
+        "R2": r2,
     }
 
 
@@ -105,18 +107,22 @@ if __name__ == "__main__":
                         continue
                     for use_instrument in [True, False]:
                         model_name = f"mag_{dataset}_{window_len}_{'coords' if use_coords else ''}_{'vs30' if use_vs30 else ''}_{'instrument' if use_instrument else ''}"
-                        configs.append({
-                            "dataset_name": dataset,
-                            "window_len": window_len,
-                            "use_coords": use_coords,
-                            "use_vs30": use_vs30,
-                            "use_instrument": use_instrument,
-                            "model_name": model_name
-                        })
+                        configs.append(
+                            {
+                                "dataset_name": dataset,
+                                "window_len": window_len,
+                                "use_coords": use_coords,
+                                "use_vs30": use_vs30,
+                                "use_instrument": use_instrument,
+                                "model_name": model_name,
+                            }
+                        )
 
     results = []
     for config in configs:
-        model_path = os.path.join("test_outputs", "models", f"{config['model_name']}.pth")
+        model_path = os.path.join(
+            "test_outputs", "models", f"{config['model_name']}.pth"
+        )
         res = evaluate_magnitude_model(
             model_path,
             dataset_name=config["dataset_name"],
@@ -127,9 +133,10 @@ if __name__ == "__main__":
         )
         if res:
             results.append(res)
-            
+
     if results:
         import pandas as pd
+
         df = pd.DataFrame(results)
         print("\n=== Summary Table ===")
         print(df.to_string(index=False))

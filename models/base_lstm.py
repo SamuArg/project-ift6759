@@ -18,6 +18,7 @@ except ImportError:
 
 N_INSTRUMENT_CLASSES: int = 6
 
+
 class ResidualConvBlock(nn.Module):
     """Two Conv1d layers with a skip connection and BatchNorm."""
 
@@ -94,19 +95,25 @@ class SeismicPicker(nn.Module):
         )
         self.lstm_dropout = nn.Dropout(dropout)
 
-        lstm_out = lstm_hidden * 2          # 256 si lstm_hidden=128
+        lstm_out = lstm_hidden * 2  # 256 si lstm_hidden=128
         head_in = lstm_out
         if self.use_coords:
-            head_in += 2                    # lat + lon
+            head_in += 2  # lat + lon
         if self.use_vs30:
-            head_in += 1                    # log10(VS30)
+            head_in += 1  # log10(VS30)
         if self.use_instrument:
-            head_in += N_INSTRUMENT_CLASSES # one-hot 6 classes
+            head_in += N_INSTRUMENT_CLASSES  # one-hot 6 classes
 
         self.head_p = nn.Conv1d(head_in, 1, kernel_size=1)
         self.head_s = nn.Conv1d(head_in, 1, kernel_size=1)
 
-    def forward(self, x: torch.Tensor, coords: torch.Tensor = None, vs30: torch.Tensor = None, instrument: torch.Tensor = None):
+    def forward(
+        self,
+        x: torch.Tensor,
+        coords: torch.Tensor = None,
+        vs30: torch.Tensor = None,
+        instrument: torch.Tensor = None,
+    ):
         B, C, L = x.shape
 
         x = self.stem(x)
@@ -120,7 +127,7 @@ class SeismicPicker(nn.Module):
 
         T = x.shape[2]  # taille temporelle après downsample
         features = [x]
- 
+
         if self.use_coords:
             if coords is None:
                 raise ValueError(
@@ -129,7 +136,7 @@ class SeismicPicker(nn.Module):
                 )
             # (B, 2) → (B, 2, T)
             features.append(coords.unsqueeze(2).expand(-1, -1, T))
- 
+
         if self.use_vs30:
             if vs30 is None:
                 raise ValueError(
@@ -138,7 +145,7 @@ class SeismicPicker(nn.Module):
                 )
             # (B, 1) → (B, 1, T)
             features.append(vs30.unsqueeze(2).expand(-1, -1, T))
- 
+
         if self.use_instrument:
             if instrument is None:
                 raise ValueError(
@@ -147,26 +154,32 @@ class SeismicPicker(nn.Module):
                 )
             # (B, 6) → (B, 6, T)
             features.append(instrument.unsqueeze(2).expand(-1, -1, T))
- 
+
         # Concatenation sur la dimension des canaux
         if len(features) > 1:
-            x = torch.cat(features, dim=1)   # → (B, head_in, T)
+            x = torch.cat(features, dim=1)  # → (B, head_in, T)
         # Si aucune feature additionnelle, x reste (B, lstm_out, T)
- 
+
         logit_p = self.head_p(x).squeeze(1)  # → (B, T)
         logit_s = self.head_s(x).squeeze(1)  # → (B, T)
- 
-        # Réinterpolation à la taille originale L 
+
+        # Réinterpolation à la taille originale L
         logit_p = F.interpolate(
             logit_p.unsqueeze(1), size=L, mode="linear", align_corners=False
         ).squeeze(1)
         logit_s = F.interpolate(
             logit_s.unsqueeze(1), size=L, mode="linear", align_corners=False
         ).squeeze(1)
- 
+
         return logit_p, logit_s
 
-    def predict(self, x: torch.Tensor, coords: torch.Tensor = None, vs30: torch.Tensor = None, instrument: torch.Tensor = None):
+    def predict(
+        self,
+        x: torch.Tensor,
+        coords: torch.Tensor = None,
+        vs30: torch.Tensor = None,
+        instrument: torch.Tensor = None,
+    ):
         """Returns sigmoid probabilities. Equivalent to sigmoid(forward(x))."""
         logit_p, logit_s = self.forward(
             x, coords=coords, vs30=vs30, instrument=instrument

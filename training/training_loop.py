@@ -21,8 +21,8 @@ def _unpack_batch(batch):
     label_p = batch["y_p"][:, 0, :]
     label_s = batch["y_s"][:, 0, :]
     coords = batch.get("coords", None)
-    vs30       = batch.get("vs30", None)         
-    instrument = batch.get("instrument", None)   
+    vs30 = batch.get("vs30", None)
+    instrument = batch.get("instrument", None)
 
     label_det = batch.get("y_det", None)
     if label_det is not None:
@@ -187,7 +187,7 @@ def run_epoch(
                     call_kwargs["vs30"] = vs30
                 if instrument is not None and getattr(model, "use_instrument", False):
                     call_kwargs["instrument"] = instrument
- 
+
                 outputs = model(waveform, **call_kwargs)
                 loss = loss_fn(outputs, label_p, label_s, label_det)
 

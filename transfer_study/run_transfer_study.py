@@ -73,14 +73,13 @@ from transfer_study.finetune_utils import (
     make_serializable,
 )
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 #  CONFIGURATION — SEULE ZONE À MODIFIER
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Chemin vers le checkpoint entraîné sur STEAD
 STEAD_CHECKPOINT = "trained_models/best_base_lstm_stead_h128_nocoords.pth"
-LSTM_HIDDEN      = 128   # doit correspondre à celui utilisé à l'entraînement
+LSTM_HIDDEN = 128  # doit correspondre à celui utilisé à l'entraînement
 
 # Fractions du jeu d'entraînement INSTANCE à utiliser pour le fine-tuning
 # 1% ≈ ~2 500 traces | 5% ≈ 12 500 | 10% ≈ 25 000 | 15% ≈ 37 500 | 25% ≈ 62 500
@@ -92,22 +91,22 @@ FRACTIONS = [0.01, 0.05, 0.10, 0.15, 0.25]
 # "full"    → LR bas pour éviter le catastrophic forgetting du CNN STEAD
 STRATEGIES = {
     "partial": 1e-3,
-    "full":    1e-4,
+    "full": 1e-4,
 }
 
 # Hyper-paramètres d'entraînement (fine-tuning)
-N_EPOCHS     = 10     # épochs de fine-tuning (identique pour toutes les fractions)
-BATCH_SIZE   = 64
-MAX_DISTANCE = 100    # km — même filtre que lors de l'entraînement STEAD
-SIGMA        = 10     # sigma gaussien pour les labels probabilistes
-TYPE_LABEL   = "gaussian"
+N_EPOCHS = 10  # épochs de fine-tuning (identique pour toutes les fractions)
+BATCH_SIZE = 64
+MAX_DISTANCE = 100  # km — même filtre que lors de l'entraînement STEAD
+SIGMA = 10  # sigma gaussien pour les labels probabilistes
+TYPE_LABEL = "gaussian"
 
 # Dossiers de sortie
 RESULTS_JSON = "transfer_study/results/transfer_results.json"
-MODELDIR     = "transfer_study/results/models"
-LOGDIR       = "transfer_study/results/logs"
-FIGDIR       = "transfer_study/results/figures"
-SEED         = 42
+MODELDIR = "transfer_study/results/models"
+LOGDIR = "transfer_study/results/logs"
+FIGDIR = "transfer_study/results/figures"
+SEED = 42
 
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -129,11 +128,11 @@ def _keep_scalar_metrics(raw: dict) -> dict:
     # Note : Si 'raw' ne contient que des erreurs absolues, il faudra s'assurer
     # que run_evaluation() renvoie bien (t_pred - t_true) pour capturer le biais directionnel.
     for phase in ["p", "s"]:
-        err_key = f"errors_{phase}_wave" # Ajuster le nom selon ce que retourne run_evaluation
+        err_key = f"errors_{phase}_wave"  # Ajuster le nom selon ce que retourne run_evaluation
         if err_key in raw and len(raw[err_key]) > 0:
             raw[f"residual_mean_{phase}"] = np.mean(raw[err_key])
             raw[f"residual_std_{phase}"] = np.std(raw[err_key])
-            
+
     # 2. Calcul explicite du Taux de Faux Positifs (FPR) sur le bruit
     if raw.get("n_noise_p", 0) > 0:
         raw["fpr_noise_p"] = raw.get("n_noise_fp_p", 0) / raw.get("n_noise_p")
@@ -141,18 +140,30 @@ def _keep_scalar_metrics(raw: dict) -> dict:
         raw["fpr_noise_s"] = raw.get("n_noise_fp_s", 0) / raw.get("n_noise_s")
 
     KEEP = {
-        "mae_p_wave",        "mae_s_wave",
-        "f1_p_wave",         "f1_s_wave",
-        "precision_p_wave",  "precision_s_wave",
-        "recall_p_wave",     "recall_s_wave",
-        "n_earthquake_p",    "n_earthquake_s",
-        "n_noise_p",         "n_noise_s",
-        "n_noise_fp_p",      "n_noise_fp_s",
-        "total_fp_p",        "total_fp_s",
-        "total_fn_p",        "total_fn_s",
-        "residual_mean_p",   "residual_mean_s",
-        "residual_std_p",    "residual_std_s",
-        "fpr_noise_p",       "fpr_noise_s"
+        "mae_p_wave",
+        "mae_s_wave",
+        "f1_p_wave",
+        "f1_s_wave",
+        "precision_p_wave",
+        "precision_s_wave",
+        "recall_p_wave",
+        "recall_s_wave",
+        "n_earthquake_p",
+        "n_earthquake_s",
+        "n_noise_p",
+        "n_noise_s",
+        "n_noise_fp_p",
+        "n_noise_fp_s",
+        "total_fp_p",
+        "total_fp_s",
+        "total_fn_p",
+        "total_fn_s",
+        "residual_mean_p",
+        "residual_mean_s",
+        "residual_std_p",
+        "residual_std_s",
+        "fpr_noise_p",
+        "fpr_noise_s",
     }
     return {k: v for k, v in raw.items() if k in KEEP}
 
@@ -173,10 +184,10 @@ def evaluate_model(model, test_loader, device, label: str) -> dict:
     raw = run_evaluation(
         model=model,
         test_loader=test_loader,
-        sampling_rate=100,           # Hz — identique pour STEAD et INSTANCE
-        confidence_threshold=0.3,    # prob min pour considérer un pick
-        noise_threshold=0.1,         # prob max du label pour considérer du bruit
-        tolerance=0.1,               # ±0.1 s pour TP/FP classification
+        sampling_rate=100,  # Hz — identique pour STEAD et INSTANCE
+        confidence_threshold=0.3,  # prob min pour considérer un pick
+        noise_threshold=0.1,  # prob max du label pour considérer du bruit
+        tolerance=0.1,  # ±0.1 s pour TP/FP classification
         device=device,
     )
     return _keep_scalar_metrics(raw)
@@ -185,6 +196,7 @@ def evaluate_model(model, test_loader, device, label: str) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════
 #  ÉTAPE 1 & 2 : ÉVALUATIONS ZERO-SHOT
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def run_zero_shot_evaluations(
     device,
@@ -254,6 +266,7 @@ def run_zero_shot_evaluations(
 #  ÉTAPE 3 : EXPÉRIENCES DE FINE-TUNING
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def run_finetuning_experiments(device, instance_test_loader_eqt) -> dict:
     """
     Pour chaque combinaison (fraction, stratégie) :
@@ -289,7 +302,9 @@ def run_finetuning_experiments(device, instance_test_loader_eqt) -> dict:
             run_label = f"finetune_{strategy}_f{int(fraction * 100):03d}pct"
 
             print(f"\n{'═' * 65}")
-            print(f"  FINE-TUNING : stratégie={strategy.upper()}  fraction={pct_label} d'INSTANCE")
+            print(
+                f"  FINE-TUNING : stratégie={strategy.upper()}  fraction={pct_label} d'INSTANCE"
+            )
             print(f"{'═' * 65}")
 
             set_seed(SEED)  # reproductibilité par run
@@ -312,12 +327,12 @@ def run_finetuning_experiments(device, instance_test_loader_eqt) -> dict:
             train_loader, val_loader, test_loader = build_loaders(
                 dataset="instance",
                 pipeline_type="eqtransformer",  # fenêtre 6000, detrend norm
-                fraction=fraction,              # SEULEMENT le train est sous-échantillonné
+                fraction=fraction,  # SEULEMENT le train est sous-échantillonné
                 batch_size=BATCH_SIZE,
                 sigma=SIGMA,
                 type_label=TYPE_LABEL,
                 max_distance=MAX_DISTANCE,
-                oversample=False,               # pas de sur-échantillonnage
+                oversample=False,  # pas de sur-échantillonnage
                 use_coords=False,
             )
 
@@ -347,11 +362,11 @@ def run_finetuning_experiments(device, instance_test_loader_eqt) -> dict:
                 model=model,
                 train_set=train_loader,
                 validation_set=val_loader,
-                test_set=test_loader,   # éval interne rapide à la fin
+                test_set=test_loader,  # éval interne rapide à la fin
                 model_name=run_label,
                 device=device,
-                optimizer=optimizer,    # pré-construit (uniquement params non-gelés)
-                learning_rate=lr,       # utilisé par OneCycleLR comme max_lr
+                optimizer=optimizer,  # pré-construit (uniquement params non-gelés)
+                learning_rate=lr,  # utilisé par OneCycleLR comme max_lr
                 epochs=N_EPOCHS,
                 print_every=1,
                 logdir=LOGDIR,
@@ -382,6 +397,7 @@ def run_finetuning_experiments(device, instance_test_loader_eqt) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════
 #  ÉTAPE 4 : GOLD STANDARD — PhaseNet (from_pretrained="instance")
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def run_gold_standard(device, instance_test_loader_pn) -> dict:
     """
@@ -421,6 +437,7 @@ def run_gold_standard(device, instance_test_loader_pn) -> dict:
 #  MAIN
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def main():
     set_seed(SEED)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -459,7 +476,7 @@ def main():
     print("\n  Construction des test loaders INSTANCE (une seule fois)…")
     instance_test_eqt = build_test_loader_only(
         dataset_name="INSTANCE",
-        pipeline_type="eqtransformer",   # 6000 échantillons, detrend
+        pipeline_type="eqtransformer",  # 6000 échantillons, detrend
         batch_size=BATCH_SIZE,
         max_distance=MAX_DISTANCE,
         sigma=SIGMA,
@@ -468,7 +485,7 @@ def main():
     )
     instance_test_pn = build_test_loader_only(
         dataset_name="INSTANCE",
-        pipeline_type="phasenet",        # 3001 échantillons, demean
+        pipeline_type="phasenet",  # 3001 échantillons, demean
         batch_size=BATCH_SIZE,
         max_distance=MAX_DISTANCE,
         sigma=SIGMA,

@@ -41,10 +41,10 @@ if _ROOT not in sys.path:
 from models.base_lstm import SeismicPicker
 from dataset.load_dataset import SeisBenchPipelineWrapper
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 #  1. CHARGEMENT DU MODÈLE STEAD
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def load_stead_model(checkpoint_path: str, lstm_hidden: int = 128) -> SeismicPicker:
     """
@@ -70,13 +70,16 @@ def load_stead_model(checkpoint_path: str, lstm_hidden: int = 128) -> SeismicPic
     state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     model.load_state_dict(state)
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"  ✓ Poids STEAD chargés depuis {checkpoint_path!r}  ({n_params:,} paramètres au total)")
+    print(
+        f"  ✓ Poids STEAD chargés depuis {checkpoint_path!r}  ({n_params:,} paramètres au total)"
+    )
     return model
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  2. STRATÉGIES DE GEL
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def apply_freeze_strategy(model: SeismicPicker, strategy: str) -> None:
     """
@@ -130,17 +133,20 @@ def apply_freeze_strategy(model: SeismicPicker, strategy: str) -> None:
         )
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    total     = sum(p.numel() for p in model.parameters())
-    frozen    = total - trainable
-    pct       = 100.0 * trainable / total if total > 0 else 0.0
+    total = sum(p.numel() for p in model.parameters())
+    frozen = total - trainable
+    pct = 100.0 * trainable / total if total > 0 else 0.0
     print(f"  Stratégie de gel : {strategy.upper()!r}")
-    print(f"  Paramètres entraînables : {trainable:,} / {total:,}  ({pct:.1f}%)  "
-          f"[gelés : {frozen:,}]")
+    print(
+        f"  Paramètres entraînables : {trainable:,} / {total:,}  ({pct:.1f}%)  "
+        f"[gelés : {frozen:,}]"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  3. OPTIMIZER SPÉCIALISÉ POUR LE FINE-TUNING
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def build_finetune_optimizer(
     model: SeismicPicker,
@@ -172,14 +178,17 @@ def build_finetune_optimizer(
             "Appeler apply_freeze_strategy() avant build_finetune_optimizer()."
         )
     optimizer = optim.AdamW(trainable_params, lr=base_lr, weight_decay=1e-4)
-    print(f"  Optimiseur AdamW  lr={base_lr:.1e}  "
-          f"({len(trainable_params)} tenseurs de paramètres)")
+    print(
+        f"  Optimiseur AdamW  lr={base_lr:.1e}  "
+        f"({len(trainable_params)} tenseurs de paramètres)"
+    )
     return optimizer
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  4. CHARGEMENT D'UN TEST LOADER SEUL (sans train/val)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def build_test_loader_only(
     dataset_name: str,
@@ -225,6 +234,7 @@ def build_test_loader_only(
 # ═══════════════════════════════════════════════════════════════════════════
 #  5. SÉRIALISATION JSON (conversion numpy → Python natif)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def make_serializable(obj):
     """
