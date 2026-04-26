@@ -16,10 +16,26 @@ from torch.utils.data import Dataset, DataLoader
 from models.cwt_unet import CWTUNetPhasePicker
 
 # model : "base_lstm" | "phasenet" | "eqtransformer" | "cwtUNet"
-# dataset : "stead" | "instance"
+# dataset : "stead" | "instance" | "dummy"
 
 
 configs = [
+    {
+        "model": "base_lstm",
+        "dataset": "dummy",
+        "checkpoint": None,
+        "fraction": 1.0,
+        "n_epochs": 2,
+        "model_name": "base_lstm",
+        "batch_size": 32,
+        "learning_rate": 1e-3,
+        "sigma": 10,
+        "type_label": "gaussian",
+        "max_distance": 100,
+        "use_coords": False,
+        "use_vs30": False,
+        "cwt_onTheFly": True,
+    },
     {
         "model": "cwtUNet",
         "dataset": "instance",
