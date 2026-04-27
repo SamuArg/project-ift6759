@@ -9,7 +9,7 @@
 
 ## Dépendances
 
-Pour pouvoir utiliser les scripts, il faut installer les dépendances suivantes :
+Pour pouvoir utiliser les scripts, il faut installer les dépendances suivantes sous Python 3.12.3:
 
 ```bash
 pip install -r requirements.txt
